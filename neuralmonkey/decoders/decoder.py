@@ -291,7 +291,6 @@ class Decoder(object):
 
     def get_rnn_cell(self):
         """Returns a RNNCell object for this decoder"""
-
         return tf.nn.rnn_cell.GRUCell(self.rnn_size)
 
 
