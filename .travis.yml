@@ -5,7 +5,7 @@ language: python
 
 env:
   global:
-    - TF=0.9.0-cp35-cp35m
+    - TF=0.9.0
   matrix:
     - TEST_SUITE=lint
     - TEST_SUITE=unit-tests
@@ -13,16 +13,22 @@ env:
     - TEST_SUITE=mypy
 
 python:
-  #- "2.7"
-  #- "3.4"
+  - "2.7"
+  - "3.4"
   - "3.5"
-  #- "3.5-dev" # 3.5 development branch
-  #- "nightly" # currently points to 3.6-dev
+
+matrix:
+  exclude:
+    - python: "2.7"
+      env: TEST_SUITE=mypy
 
 # commands to install dependencies
 before_install:
+  - if [[ $TRAVIS_PYTHON_VERSION == 2* ]]; then export TFS=cp27-none; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 3.4* ]]; then export TFS=cp34-cp34m; fi
+  - if [[ $TRAVIS_PYTHON_VERSION == 3.5* ]]; then export TFS=cp35-cp35m; fi
   - pip install -r requirements.txt
-  - pip install https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-$TF""-linux_x86_64.whl
+  - pip install https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-$TF""-$TFS""-linux_x86_64.whl
   - if [ -f tests/$TEST_SUITE""_requirements.txt ]; then pip install -r tests/$TEST_SUITE""_requirements.txt; fi
 
 # command to run tests
