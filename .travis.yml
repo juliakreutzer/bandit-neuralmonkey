@@ -21,6 +21,7 @@ python:
 
 # commands to install dependencies
 before_install:
+  - perl --version
   - pip install -r requirements.txt
   - pip install https://storage.googleapis.com/tensorflow/linux/cpu/tensorflow-$TF""-linux_x86_64.whl
   - if [ -f tests/$TEST_SUITE""_requirements.txt ]; then pip install -r tests/$TEST_SUITE""_requirements.txt; fi
