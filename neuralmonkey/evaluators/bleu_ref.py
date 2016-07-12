@@ -37,6 +37,8 @@ class BLEUReferenceImplWrapper(object):
                                      stdout=subprocess.PIPE)
 
         proc_stdout = output_proc.stdout.decode("utf-8")
+        print("WRAPPER STDOUT:")
+        print(proc_stdout)
         lines = proc_stdout.splitlines()
 
         try:
