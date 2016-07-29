@@ -12,12 +12,9 @@ class GreedyRunner(object):
         self.batch_size = batch_size
         self.vocabulary = decoder.vocabulary
 
-    def __call__(self, sess, dataset, coders):
+    def __call__(self, sess, dataset, coders, get_probs=False):
         batched_dataset = dataset.batch_dataset(self.batch_size)
         decoded_sentences = []
-
-        # if are are target sentence, we will compute also the
-        # losses, otherwise just compute zero
         if dataset.has_series(self.decoder.data_id):
             losses = [self.decoder.train_loss,
                       self.decoder.runtime_loss]
@@ -30,25 +27,34 @@ class GreedyRunner(object):
         for batch in batched_dataset:
             batch_feed_dict = feed_dicts(batch, coders, train=False)
             batch_count += 1
+            fetch = []
+
+            # if are are target sentence, we will compute also the losses
             if dataset.has_series(self.decoder.data_id):
-                losses = [self.decoder.train_loss,
-                          self.decoder.runtime_loss]
-            else:
-                losses = [tf.zeros([]), tf.zeros([])]
+                fetch = [self.decoder.train_loss,
+                         self.decoder.runtime_loss]
 
-            computation = sess.run(losses
-                                   + [self.decoder.decoded_logprobs]
-                                   + self.decoder.decoded,
-                                   feed_dict=batch_feed_dict)
-            loss_with_gt_ins += computation[0]
-            loss_with_decoded_ins += computation[1]
+            if get_probs:
+                prob_index = len(fetch)
+                fetch.append(self.decoder.decoded_logprobs)
 
-            logprobs = computation[2]
-            debug("log probability of the first sentence in batch: {}".
-                  format(logprobs[0]), label="dumper")
+            decoded_start_index = len(fetch)
+            fetch += self.decoder.decoded
 
-            decoded_sentences_batch = \
-                    self.vocabulary.vectors_to_sentences(computation[3:])
+            computation = sess.run(fetch, feed_dict=batch_feed_dict)
+
+            if dataset.has_series(self.decoder.data_id):
+                loss_with_gt_ins += computation[0]
+                loss_with_decoded_ins += computation[1]
+
+            if get_probs:
+                logprobs = computation[prob_index]
+                debug("log probability of the first sentence in batch: {}".
+                      format(logprobs[0]), label="dumper")
+
+            decoded_sentences_batch = self.vocabulary.vectors_to_sentences(
+                computation[decoded_start_index:])
+
             decoded_sentences += decoded_sentences_batch
 
         return decoded_sentences, \
