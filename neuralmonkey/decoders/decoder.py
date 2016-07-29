@@ -93,8 +93,9 @@ class Decoder(object):
 
         ### KONEC decoder scope
 
-        _, train_logits = self.decode(self.train_rnn_outputs)
-        self.decoded, runtime_logits = self.decode(self.runtime_rnn_outputs)
+        _, train_logits, _ = self.decode(self.train_rnn_outputs)
+        self.decoded, runtime_logits, self.decoded_logprobs = self.decode(
+            self.runtime_rnn_outputs)
 
         self.train_loss = tf.nn.seq2seq.sequence_loss(
             train_logits, train_targets, self.train_weights,
@@ -144,12 +145,16 @@ class Decoder(object):
         """Decodes a sequence from a list of hidden states
 
         Arguments:
-            rnn_states: hidden states
+            rnn_states: hidden states (list of batch x rnn_size tensors)
         """
         logits = [self.logit_function(s) for s in rnn_states]
         decoded = [tf.argmax(l[:, 1:], 1) + 1 for l in logits]
 
-        return decoded, logits
+        logprobs = [tf.nn.log_softmax(l) for l in logits]
+        decoded_logprobs_timed = [tf.reduce_max(l[:, 1:], 1) for l in logprobs]
+        decoded_logprobs = sum(decoded_logprobs_timed)
+
+        return decoded, logits, decoded_logprobs
 
 
     def training_placeholders(self):

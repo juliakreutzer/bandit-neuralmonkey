@@ -1,9 +1,11 @@
 import tensorflow as tf
 
 from neuralmonkey.learning_utils import feed_dicts
+from neuralmonkey.logging import debug
 
-# tests: mypy
+# tests: lint, mypy
 
+# pylint: disable=too-few-public-methods
 class GreedyRunner(object):
     def __init__(self, decoder, batch_size):
         self.decoder = decoder
@@ -34,12 +36,19 @@ class GreedyRunner(object):
             else:
                 losses = [tf.zeros([]), tf.zeros([])]
 
-            computation = sess.run(losses + self.decoder.decoded,
+            computation = sess.run(losses
+                                   + [self.decoder.decoded_logprobs]
+                                   + self.decoder.decoded,
                                    feed_dict=batch_feed_dict)
             loss_with_gt_ins += computation[0]
             loss_with_decoded_ins += computation[1]
+
+            logprobs = computation[2]
+            debug("log probability of the first sentence in batch: {}".
+                  format(logprobs[0]), label="dumper")
+
             decoded_sentences_batch = \
-                    self.vocabulary.vectors_to_sentences(computation[len(losses):])
+                    self.vocabulary.vectors_to_sentences(computation[3:])
             decoded_sentences += decoded_sentences_batch
 
         return decoded_sentences, \
