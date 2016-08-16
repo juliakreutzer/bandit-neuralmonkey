@@ -11,6 +11,78 @@ import tensorflow as tf
 from neuralmonkey.logging import debug
 from neuralmonkey.nn.projection import maxout, linear
 
+def beamsearch_decoder(go_symbols, initial_state, attention_objects,
+                       embedding_size, cell, logit_function, embedding_matrix,
+                       beam_size=8, max_length=20, output_size=None,
+                       dtype=tf.float32, scope=None):
+
+    if output_size is None:
+        output_size = cell.output_size
+
+    with tf.variable_scope(scope or "beamsearch_decoder"):
+
+        batch_size = tf.shape(decoder_inputs[0])[0]
+
+        if len(initial_state.get_shape()) == 1:
+            state_size = initial_state.get_shape()[0].value
+            initial_state = tf.reshape(tf.tile(initial_state,
+                                               tf.shape(decoder_inputs[0])[:1]),
+                                       [-1, state_size])
+
+        attns = [a.initialize(batch_size, dtype) for a in attention_objects]
+        x = tf.nn.seq2seq.linear([go_symbols] + attns, embedding_size, True)
+
+        output, state = cell(x, initial_state)
+        attns = [a.attention(state) for a in attention_objects]
+
+        with tf.variable_scope("AttnOutputProjection"):
+            output = tf.nn.seq2seq.linear([output] + attns, output_size, True)
+
+        beam_outputs = [[output] for _ in range(beam_size)]
+        beam_states = [[state] for _ in range(beam_size)]
+        beam_logprobs = [[] for _ in range(beam_size)]
+        #beam_prevs = [None for _ in range(beam_size)]
+
+
+        output_activation = logit_function(output)
+        # batch x vocabulary
+        output_logprobs = tf.log_softmax(output_activation)
+        # batch x k (both)
+        top_vals, top_inds = tf.nn.top_k(output_logprobs, beam_size)
+
+        beam_logprobs = [[v] for v in tf.unpack(top_vals, 1)]
+        beam_indices = [[v] for v in tf.unpack(top_inds, 1)]
+
+        beam_attns = [[a.attention(state) for a in attention_objects]
+                      for _ in range(beam_size)]
+
+        for i in range(1, max_length):
+            tf.get_variable_scope().reuse_variables()
+
+            for beam in range(beam_size):
+                inp = tf.nn.embedding_lookup(embedding_matrix,
+                                             beam_indices[beam])
+
+                # dropout
+
+                x = tf.nn.seq2seq.linear([inp] + beam_attns[beam][-1], embedding_size, True)
+
+                output, state = cell(x, beam_states[beam])
+
+
+
+
+
+
+        for i, inp in enumerate(decoder_inputs):
+            tf.get_variable_scope().reuse_variables()
+
+            output_activation = logit_function(prev)
+            output_logprobs = tf.log_softmax(output_activation)
+            top_vals, top_inds = tf.nn.top_k(output_logprobs,
+                                             k=beam_size)
+
+
 # pylint: disable=too-many-arguments
 # Great functions require great number of parameters
 def attention_decoder(decoder_inputs, initial_state, attention_objects,
