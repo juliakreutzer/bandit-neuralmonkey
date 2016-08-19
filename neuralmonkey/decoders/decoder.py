@@ -5,8 +5,8 @@ import tensorflow as tf
 import numpy as np
 
 from neuralmonkey.vocabulary import START_TOKEN
-from neuralmonkey.decoding_function import attention_decoder
-from neuralmonkey.logging import log
+from neuralmonkey.decoding_function import attention_decoder, beamsearch_decoder
+from neuralmonkey.logging import log, debug
 
 class Decoder(object):
     """A class that manages parts of the computation graph that are
@@ -62,6 +62,7 @@ class Decoder(object):
 
         self.project_encoder_outputs = kwargs.get("project_encoder_outputs",
                                                   False)
+        beam_size = kwargs.get("beam_size", 1)
 
         log("Initializing decoder, name: '{}'".format(self.name))
 
@@ -99,21 +100,42 @@ class Decoder(object):
 
         embedded_train_inputs = self._embed_inputs(self.train_inputs[:-1])
 
-        self.train_rnn_outputs, _ = attention_decoder(
-            embedded_train_inputs, state, attention_objects,
-            cell, attention_maxout_size)
-
         # runtime methods and objects are used when no ground truth is provided
         # (such as during testing)
         runtime_inputs = self._runtime_inputs(self.go_symbols)
-        loop_function = self._get_loop_function()
 
-        ### Use the same variables for runtime decoding!
-        tf.get_variable_scope().reuse_variables()
+        if beam_size > 1:
+            train_beam_outputs, _ = beamsearch_decoder(
+                embedded_train_inputs, state, attention_objects, cell,
+                attention_maxout_size)
 
-        self.runtime_rnn_outputs, _ = attention_decoder(
-            runtime_inputs, state, attention_objects, cell,
-            attention_maxout_size, loop_function=loop_function)
+            loop_function = self._get_loop_function(beam_search=True)
+            tf.get_variable_scope().reuse_variables()
+
+            runtime_beam_outputs, _ = beamsearch_decoder(
+                embedded_train_inputs, state, attention_objects, cell,
+                attention_maxout_size, beam_size=beam_size,
+                beam_loop_function=loop_function)
+
+            debug(train_beam_outputs[0].get_shape())
+            debug(runtime_beam_outputs[0].get_shape())
+
+            self.train_rnn_outputs = train_beam_outputs
+            self.runtime_rnn_outputs = runtime_beam_outputs
+
+        else:
+            self.train_rnn_outputs, _ = attention_decoder(
+                embedded_train_inputs, state, attention_objects,
+                cell, attention_maxout_size)
+
+            loop_function = self._get_loop_function()
+
+            ### Use the same variables for runtime decoding!
+            tf.get_variable_scope().reuse_variables()
+
+            self.runtime_rnn_outputs, _ = attention_decoder(
+                runtime_inputs, state, attention_objects, cell,
+                attention_maxout_size, loop_function=loop_function)
 
         _, train_logits = self._decode(self.train_rnn_outputs)
         self.decoded, runtime_logits = self._decode(self.runtime_rnn_outputs)
@@ -275,7 +297,7 @@ class Decoder(object):
         return inputs
 
 
-    def _get_loop_function(self):
+    def _get_loop_function(self, beam_search=False):
         """Constructs a loop function for the decoder"""
 
         def basic_loop(previous_state, _):
@@ -294,7 +316,49 @@ class Decoder(object):
 
             return self._dropout(input_embedding)
 
-        return basic_loop
+
+        def beamsearch_loop(beam_outputs, step):
+            """Beamsearch loop function.
+
+            Arguments:
+                beam_outputs: Beam-sized list of previous outputs
+                i: Maybe unused? argument
+            """
+            beam_size = len(beam_outputs)
+
+            # will store a list of batch x vocabulary tensors
+            softmaxes = []
+
+            for beam, output in enumerate(beam_outputs):
+                output_activation = self._logit_function(output)
+                beam_softmax = tf.nn.log_softmax(output_activation)
+                softmaxes.append(beam_softmax)
+
+            ## we sum the softmaxes to get probs of next word
+            ## given all histories
+            ## there some independence assumptions here, but who cares (?)
+
+            # beam x batch x vocabulary
+            packed_softmaxes = tf.pack(softmaxes)
+
+            # batch x vocabulary
+            summed_softmaxes = tf.reduce_sum(packed_softmaxes, 0)
+
+            # batch x beam with values being vocabulary indices
+            _, indices = tf.nn.top_k(summed_softmaxes, beam_size)
+
+            # batch x beam x embedding_size
+            embeddings = tf.nn.embedding_lookup(self.embedding_matrix, indices)
+            dropped_embeddings = self._dropout(embeddings)
+
+            # beam x batch x embedding_size
+            transposed = tf.transpose(dropped_embeddings, [1, 0, 2])
+
+            # return list of batch x embedding_size
+            return tf.unpack(transposed)
+
+
+        return beamsearch_loop if beam_search else basic_loop
 
 
     def _logit_function(self, state):

@@ -11,76 +11,62 @@ import tensorflow as tf
 from neuralmonkey.logging import debug
 from neuralmonkey.nn.projection import maxout, linear
 
-def beamsearch_decoder(go_symbols, initial_state, attention_objects,
-                       embedding_size, cell, logit_function, embedding_matrix,
-                       beam_size=8, max_length=20, output_size=None,
-                       dtype=tf.float32, scope=None):
-
-    if output_size is None:
-        output_size = cell.output_size
-
-    with tf.variable_scope(scope or "beamsearch_decoder"):
-
-        batch_size = tf.shape(decoder_inputs[0])[0]
-
-        if len(initial_state.get_shape()) == 1:
-            state_size = initial_state.get_shape()[0].value
-            initial_state = tf.reshape(tf.tile(initial_state,
-                                               tf.shape(decoder_inputs[0])[:1]),
-                                       [-1, state_size])
-
-        attns = [a.initialize(batch_size, dtype) for a in attention_objects]
-        x = tf.nn.seq2seq.linear([go_symbols] + attns, embedding_size, True)
-
-        output, state = cell(x, initial_state)
-        attns = [a.attention(state) for a in attention_objects]
-
-        with tf.variable_scope("AttnOutputProjection"):
-            output = tf.nn.seq2seq.linear([output] + attns, output_size, True)
-
-        beam_outputs = [[output] for _ in range(beam_size)]
-        beam_states = [[state] for _ in range(beam_size)]
-        beam_logprobs = [[] for _ in range(beam_size)]
-        #beam_prevs = [None for _ in range(beam_size)]
 
 
-        output_activation = logit_function(output)
-        # batch x vocabulary
-        output_logprobs = tf.log_softmax(output_activation)
-        # batch x k (both)
-        top_vals, top_inds = tf.nn.top_k(output_logprobs, beam_size)
+def beamsearch_decoder(decoder_inputs, initial_state, attention_objects,
+                       cell, maxout_size, beam_size=8, beam_loop_function=None,
+                       scope=None):
 
-        beam_logprobs = [[v] for v in tf.unpack(top_vals, 1)]
-        beam_indices = [[v] for v in tf.unpack(top_inds, 1)]
+    if beam_loop_function is None:
+        beam_size = 1
 
-        beam_attns = [[a.attention(state) for a in attention_objects]
-                      for _ in range(beam_size)]
+    with tf.variable_scope(scope or "beam_attention_decoder"):
+        output, state = decode_step(decoder_inputs[0], initial_state,
+                                    attention_objects, cell, maxout_size)
 
-        for i in range(1, max_length):
+        ## must be indexed first by the step and then by the beam
+        # beam_outputs[0] je seznam outputů v prvnim stepu.
+        # len(beam_outputs[i]) == beam_size
+        # len(beam_outputs) = max_output_length (na konci, na zacatku jedna)
+        init_outputs = [output for _ in range(beam_size)]
+        init_states = [state for _ in range(beam_size)]
+
+        all_outputs = [init_outputs]
+        all_states = [init_states]
+
+        best_outputs = [output]
+        best_states = [state]
+
+        for step in range(1, len(decoder_inputs)):
             tf.get_variable_scope().reuse_variables()
+
+            if beam_loop_function:
+                # loop function returns list of batch x embedding
+                decoder_top_inputs = beam_loop_function(all_outputs[-1], step)
+            else:
+                # one-item-list of batch x embedding
+                decoder_top_inputs = [decoder_inputs[step]]
+
+            beam_outputs = []
+            beam_states = []
 
             for beam in range(beam_size):
-                inp = tf.nn.embedding_lookup(embedding_matrix,
-                                             beam_indices[beam])
+                tf.get_variable_scope().reuse_variables()
 
-                # dropout
+                output, state = decode_step(
+                    decoder_top_inputs[beam], all_states[-1][beam],
+                    attention_objects, cell, maxout_size)
 
-                x = tf.nn.seq2seq.linear([inp] + beam_attns[beam][-1], embedding_size, True)
+                beam_outputs.append(output)
+                beam_states.append(state)
 
-                output, state = cell(x, beam_states[beam])
+            best_outputs.append(beam_outputs[0])
+            best_states.append(beam_states[0])
 
+            all_outputs.append(beam_outputs)
+            all_states.append(beam_states)
 
-
-
-
-
-        for i, inp in enumerate(decoder_inputs):
-            tf.get_variable_scope().reuse_variables()
-
-            output_activation = logit_function(prev)
-            output_logprobs = tf.log_softmax(output_activation)
-            top_vals, top_inds = tf.nn.top_k(output_logprobs,
-                                             k=beam_size)
+        return best_outputs, best_states
 
 
 # pylint: disable=too-many-arguments
