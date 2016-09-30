@@ -138,14 +138,15 @@ class Decoder(object):
                 attention_maxout_size, loop_function=loop_function)
 
         _, train_logits = self._decode(self.train_rnn_outputs)
-        self.decoded, runtime_logits = self._decode(self.runtime_rnn_outputs)
+        self.decoded, self.runtime_logits = self._decode(
+            self.runtime_rnn_outputs)
 
         self.train_loss = tf.nn.seq2seq.sequence_loss(
             train_logits, train_targets, self.train_weights,
             self.vocabulary_size)
 
         self.runtime_loss = tf.nn.seq2seq.sequence_loss(
-            runtime_logits, train_targets, self.train_weights,
+            self.runtime_logits, train_targets, self.train_weights,
             self.vocabulary_size)
 
         ### Learning step
