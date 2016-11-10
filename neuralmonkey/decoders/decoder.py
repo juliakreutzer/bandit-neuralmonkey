@@ -82,7 +82,7 @@ class Decoder(object):
         self.embedding_matrix = self._input_embeddings()
 
         self.train_inputs, self.train_weights = self._training_placeholders()
-        train_targets = self.train_inputs[1:]
+        self.train_targets = self.train_inputs[1:]
 
         self.go_symbols = tf.placeholder(tf.int32, shape=[None],
                                          name="decoder_go_symbols")
@@ -114,20 +114,18 @@ class Decoder(object):
 
         self.runtime_rnn_states += rnn_states
 
-        _, train_logits = self._decode(self.train_rnn_outputs)
-        self.decoded, runtime_logits = self._decode(self.runtime_rnn_outputs)
+        _, self.train_logits = self._decode(self.train_rnn_outputs)
+        self.decoded, self.runtime_logits = self._decode(self.runtime_rnn_outputs)
 
         self.train_loss = tf.nn.seq2seq.sequence_loss(
-            train_logits, train_targets, self.train_weights,
+            self.train_logits, self.train_targets, self.train_weights,
             self.vocabulary_size)
 
         self.runtime_loss = tf.nn.seq2seq.sequence_loss(
-            runtime_logits, train_targets, self.train_weights,
+            self.runtime_logits, self.train_targets, self.train_weights,
             self.vocabulary_size)
 
-        # TODO [refactor] put runtime logits to self from the beginning
-        self.runtime_logits = runtime_logits
-        self.runtime_logprobs = [tf.nn.log_softmax(l) for l in runtime_logits]
+        self.runtime_logprobs = [tf.nn.log_softmax(l) for l in self.runtime_logits]
 
         ### Learning step
         ### TODO was here only because of scheduled sampling.

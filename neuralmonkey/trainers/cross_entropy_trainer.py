@@ -5,9 +5,10 @@ from neuralmonkey.logging import log
 # tests: mypy
 
 class CrossEntropyTrainer(object):
-    def __init__(self, decoder, l2_regularization):
+    def __init__(self, decoder, l2_regularization=0, learning_rate=1e-4):
         log("Initializing Cross-entropy trainer.")
         self.decoder = decoder
+        self.learning_rate = learning_rate
 
         with tf.variable_scope("l2_regularization"):
             l2_value = sum([tf.reduce_sum(v ** 2) for v in tf.trainable_variables()])
@@ -18,7 +19,7 @@ class CrossEntropyTrainer(object):
 
             tf.scalar_summary('train_l2_cost', l2_value, collections=["summary_train"])
 
-        optimizer = tf.train.AdamOptimizer(1e-4)
+        optimizer = tf.train.AdamOptimizer(self.learning_rate)
         gradients = optimizer.compute_gradients(decoder.cost + l2_cost)
         #for (g, v) in gradients:
         #    if g is not None:

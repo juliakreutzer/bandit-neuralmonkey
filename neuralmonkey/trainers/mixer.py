@@ -16,7 +16,7 @@ class Mixer(object):
     starts to use the reinforce algorithm for the optimization.
 
     """
-    def __init__(self, decoder, initial_trainer, xent_calls, moving_calls):
+    def __init__(self, decoder, initial_trainer, xent_calls, moving_calls, learning_rate):
         """
         Constructs the TensorFlow graph for the MIXER code - i.e. the regressor
         estimating BLEU from hidden states and the gradients from the REINFORCE
@@ -41,12 +41,13 @@ class Mixer(object):
         self.called = 0
         self.xent_calls = xent_calls
         self.moving_calls = moving_calls
+        self.learning_rate = learning_rate
 
         with tf.variable_scope('mixer'):
             # BLEU score needs to be computed outside the TF
             self.bleu = tf.placeholder(tf.float32, [None])
 
-            hidden_states = decoder.hidden_states
+            hidden_states = decoder.train_rnn_outputs  # with monster_decoder: decoder.hidden_states
 
             # a simple regressor that estimates the BLEU score from the network's hidden states
             with tf.variable_scope('exprected_reward_regressor'):
@@ -57,7 +58,7 @@ class Mixer(object):
                     tf.squeeze(tf.matmul(h, linear_reg_W)) + linear_reg_b for h in hidden_states]
 
                 regression_loss = sum([(r - self.bleu) ** 2 for r in expected_rewards]) * 0.5
-                self.regression_optimizer = tf.train.AdamOptimizer(1e-3).minimize(regression_loss)
+                self.regression_optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(regression_loss)
 
 
             ## decoded_logits: list of [batch x vabulary] tensors (length max sequence)
@@ -67,12 +68,12 @@ class Mixer(object):
                 # this is a dirty trick to get the indices of maxima in the logits
                 max_logits = \
                     [tf.expand_dims(tf.reduce_max(l, 1), 1) \
-                        for l in decoder.decoded_logits] ## batch x 1 x 1
+                        for l in decoder.train_logits] ## batch x 1 x 1  
                 indicator = \
                     [tf.to_float(tf.equal(ml, l)) \
-                        for ml, l in zip(max_logits, decoder.decoded_logits)] ## batch x slovnik
+                        for ml, l in zip(max_logits, decoder.train_logits)] ## batch x slovnik
 
-                log("Forward cmomputation graph ready")
+                log("Forward computation graph ready")
 
                 # this is implementation of equation (11) in the paper
                 derivatives = [
@@ -80,7 +81,7 @@ class Mixer(object):
                         tf.expand_dims(self.bleu - r, 1) * (tf.nn.softmax(l) - i) * w,
                         0, keep_dims=True)
                     for r, l, i, w in zip(
-                        expected_rewards, decoder.decoded_logits, indicator, decoder.weights_ins)]
+                        expected_rewards, decoder.train_logits, indicator, decoder.train_weights)]
                 ## ^^^ list of  [1 x vocabulary] tensors
 
                 # this derivatives are constant for us now, we don't really
@@ -94,15 +95,15 @@ class Mixer(object):
                 # this is implementation of equation (10) in the paper
                 reinforce_gradients = \
                     [tf.gradients(l * d, trainable_vars) \
-                        for l, d in zip(decoder.decoded_logits, derivatives_stopped)]
+                        for l, d in zip(decoder.train_logits, derivatives_stopped)]
                 ## ^^^ [slovnik x shape promenny](delky max seq)
 
-                log("Reinfoce gradients computed")
+                log("Reinforce gradients computed")
 
             with tf.variable_scope("cross_entropy_gradients"):
                 cross_entropies = [
                     tf.reduce_sum(tf.nn.sparse_softmax_cross_entropy_with_logits(l, t) * w, 0)
-                    for l, t, w in zip(decoder.decoded_logits, decoder.targets, decoder.weights_ins)
+                    for l, t, w in zip(decoder.train_logits, decoder.train_targets, decoder.train_weights)
                 ]
                     ## ^^^ list of scalars in time
 
@@ -136,9 +137,9 @@ class Mixer(object):
                             mixed_gradients[j] += g
 
             self.mixer_optimizer = \
-                    tf.train.AdamOptimizer().apply_gradients(list(zip(mixed_gradients, trainable_vars)))
+                    tf.train.AdamOptimizer(self.learning_rate).apply_gradients(list(zip(mixed_gradients, trainable_vars)))
 
-        self.summary_gradients = tf.merge_summary(tf.get_collection("summary_gradients"))
+        #self.summary_gradients = tf.merge_summary(tf.get_collection("summary_gradients"))
         self.summary_train = summary_train = tf.merge_summary(tf.get_collection("summary_train"))
 
         ### WHAAAT??? tenhle kod tu nechavam zakomentovanej z piety
@@ -149,9 +150,9 @@ class Mixer(object):
         if self.called < self.xent_calls:
             return self.xent_trainer.run(sess, fd, references, verbose=verbose)
 
-        reinforce_steps = max(self.decoder.max_output_len + 2, (self.called - self.xent_calls) / self.moving_calls + 1)
+        reinforce_steps = max(self.decoder.max_output + 2, (self.called - self.xent_calls) / self.moving_calls + 1)
 
-        decoded_sequence = sess.run(self.decoder.decoded_seq, feed_dict=fd)
+        decoded_sequence = sess.run(self.decoder.decoded, feed_dict=fd)
         sentences = self.decoder.vocabulary.vectors_to_sentences(decoded_sequence)
 
         def get_bleu(r, s):
@@ -176,9 +177,9 @@ class Mixer(object):
 
         if verbose:
             computation = sess.run(
-                [self.mixer_optimizer, self.decoder.loss_with_decoded_ins,
-                 self.decoder.loss_with_gt_ins, self.summary_train]
-                + self.decoder.decoded_seq,
+                [self.mixer_optimizer, self.decoder.runtime_loss,
+                 self.decoder.train_loss, self.summary_train]
+                + self.decoder.decoded,
                 feed_dict=fd)
         else:
             computation = sess.run([self.mixer_optimizer], feed_dict=fd)
