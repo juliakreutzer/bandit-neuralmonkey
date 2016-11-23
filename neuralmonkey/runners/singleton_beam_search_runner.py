@@ -5,89 +5,13 @@ import numpy as np
 from neuralmonkey.learning_utils import feed_dicts
 from neuralmonkey.encoders.sentence_encoder import SentenceEncoder
 from neuralmonkey.logging import Logging, debug
+from neuralmonkey.hypothesis import Hypothesis, sort_hypotheses
 #from neuralmonkey.vocabulary import START_TOKEN, END_TOKEN
 
 Logging.debug_disabled.append("beamSearch")
 
 START_TOKEN_INDEX = 1
 END_TOKEN_INDEX = 2
-
-def sort_hypotheses(hyps, normalize_by_length=True):
-    """Sort hypotheses based on log probs and length.
-
-    Args:
-        hyps: A list of hypothesis.
-        normalize_by_length: Whether to normalize by length
-    Returns:
-        hyps: A list of sorted hypothesis in reverse log_prob order.
-    """
-    if normalize_by_length:
-        return sorted(hyps, key=lambda h: h.log_prob/len(h.tokens),
-                      reverse=True)
-    else:
-        return sorted(hyps, key=lambda h: h.log_prob, reverse=True)
-
-
-class Hypothesis(object):
-    """A class that represents a single hypothesis in a beam."""
-
-    # pylint: disable=too-many-arguments
-    # Maybe the logits can be refactored out (they serve only to compute loss)
-    def __init__(self, tokens, log_prob, state, rnn_output=None, logits=None):
-        """Construct a new hypothesis object
-
-        Arguments:
-            tokens: The list of already decoded tokens
-            log_prob: The log probability of the decoded tokens given the model
-            state: The last state of the decoder
-            rnn_output: The last rnn_output of the decoder
-            logits: The list of logits over the vocabulary (in time)
-        """
-        self.tokens = tokens
-        self.log_prob = log_prob
-        self.state = state
-        self._rnn_output = rnn_output
-        self._logits = [] if logits is None else logits
-
-    # pylint: disable=too-many-arguments
-    # Maybe the logits can be refactored out (they serve only to compute loss)
-    def extend(self, token, log_prob, new_state, new_rnn_output, new_logits):
-        """Return an extended version of the hypothesis.
-
-        Arguments:
-            token: The token to attach to the hypothesis
-            log_prob: The log probability of emiting this token
-            new_state: The RNN state of the decoder after decoding the token
-            new_rnn_output: The RNN output tensor that emitted the token
-            new_logits: The logits made from the RNN output
-        """
-        return Hypothesis(self.tokens + [token],
-                          self.log_prob + log_prob,
-                          new_state, new_rnn_output,
-                          self._logits + [new_logits])
-
-    @property
-    def latest_token(self):
-        """Get the last token from the hypothesis."""
-        return self.tokens[-1]
-
-    @property
-    def rnn_output(self):
-        """Get the last RNN output"""
-        if self._rnn_output is None:
-            raise Exception("Getting rnn_output before specifying it")
-        return self._rnn_output
-
-    @property
-    def runtime_logits(self):
-        """Get the sequence of logits (for computing loss)"""
-        if self._logits is None:
-            raise Exception("Getting logit sequence from empty hypothesis")
-        return self._logits
-
-    def __str__(self):
-        return ("Hypothesis(log prob = {:.4f}, tokens = {})".format(
-            self.log_prob, self.tokens))
 
 # pylint: disable=too-few-public-methods
 # Subject to issue #9
@@ -109,7 +33,7 @@ class BeamSearchRunner(object):
 
     # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     # Long function, whoever wants to refactor it, be my guest
-    def __call__(self, sess, dataset, coders):
+    def __call__(self, sess, dataset, coders, extra_fetches=None):
         """The caller method for the runner.
 
         Arguments:
@@ -137,7 +61,8 @@ class BeamSearchRunner(object):
 
             for encoder in coders:
                 if isinstance(encoder, SentenceEncoder):
-                    fetches += encoder.outputs_bidi
+                    fetches += encoder.outputs_bidi_t
+                    #fetches += encoder.attention_tensor
 
             computation = sess.run(fetches, feed_dict=feed_dict)
 
@@ -307,4 +232,4 @@ class BeamSearchRunner(object):
         train_loss /= sentence_count
         runtime_loss /= sentence_count
 
-        return decoded_sentences, train_loss, runtime_loss
+        return decoded_sentences, train_loss, runtime_loss, None # TODO add evaluated fetches

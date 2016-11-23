@@ -89,12 +89,12 @@ class SentenceEncoder(object):
                     self.backward_gru, backward_dropout_mask, scale)
 
 
-            outputs_bidi_t, encoded_t = tf.nn.bidirectional_dynamic_rnn(
+            self.outputs_bidi_t, encoded_t = tf.nn.bidirectional_dynamic_rnn(
                 self.forward_gru, self.backward_gru,
                 dropped_embedded_inputs, self.sentence_lengths,
                 dtype=tf.float32)
 
-            self.attention_tensor = tf.concat(2, outputs_bidi_t)
+            self.attention_tensor = tf.concat(2, self.outputs_bidi_t)
             self.encoded = tf.concat(1, encoded_t)
 
             self.attention_object = attention_type(
