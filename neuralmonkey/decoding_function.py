@@ -1,60 +1,18 @@
+"""
+Module which implements decoding functions using multiple attentions
+for RNN decoders.
+
+See http://arxiv.org/abs/1606.07481
+"""
+#tests: lint
+
 import tensorflow as tf
+from neuralmonkey.nn.projection import linear
 
-def attention_decoder(decoder_inputs, initial_state, attention_objects,
-                      embedding_size, cell, output_size=None,
-                      loop_function=None, dtype=tf.float32, scope=None):
-
-    if output_size is None:
-        output_size = cell.output_size
-
-    with tf.variable_scope(scope or "attention_decoder"):
-        batch_size = tf.shape(decoder_inputs[0])[0]    # Needed for reshaping.
-
-        # do manualy broadcasting of the initial state if we want it
-        # to be the same for all inputs
-        if len(initial_state.get_shape()) == 1:
-            state_size = initial_state.get_shape()[0].value
-            initial_state = tf.reshape(tf.tile(initial_state,
-                                               tf.shape(decoder_inputs[0])[:1]),
-                                       [-1, state_size])
-
-        state = initial_state
-        outputs = []
-        prev = None
-
-        attns = [a.initialize(batch_size, dtype) for a in attention_objects]
-
-        states = []
-        for i, inp in enumerate(decoder_inputs):
-            if i > 0:
-                tf.get_variable_scope().reuse_variables()
-            # If loop_function is set, we use it instead of decoder_inputs.
-            if loop_function is not None and prev is not None:
-                with tf.variable_scope("loop_function", reuse=True):
-                    inp = loop_function(prev, i)
-            # Merge input and previous attentions into one vector of the right
-            # size.
-            x = tf.nn.seq2seq.linear([inp] + attns, embedding_size, True)
-            # Run the RNN.
-            cell_output, state = cell(x, state)
-            states.append(state)
-            # Run the attention mechanism.
-            attns = [a.attention(state) for a in attention_objects]
-
-            if attns:
-                with tf.variable_scope("AttnOutputProjection"):
-                    output = tf.nn.seq2seq.linear([cell_output] + attns, output_size,
-                                             True)
-            else:
-                output = cell_output
-
-            if loop_function is not None:
-                prev = output
-            outputs.append(output)
-
-    return outputs, states
 
 class Attention(object):
+    #pylint: disable=unused-argument,too-many-instance-attributes,too-many-arguments
+    # For maintaining the same API as in CoverageAttention
     def __init__(self, attention_states, scope, dropout_placeholder,
                  input_weights=None, max_fertility=None):
         """Create the attention object.
@@ -96,6 +54,8 @@ class Attention(object):
             self.hidden_features = tf.nn.conv2d(self.att_states_reshaped, k,
                                                 [1, 1, 1, 1], "SAME")
 
+            #pylint: disable=invalid-name
+            # see comments on disabling invalid names below
             self.v = tf.get_variable("AttnV", [self.attention_vec_size])
 
     def attention(self, query_state):
@@ -104,9 +64,12 @@ class Attention(object):
         """
 
         with tf.variable_scope(self.scope+"/Attention"):
-            y = tf.nn.seq2seq.linear(query_state, self.attention_vec_size, True)
+            y = linear(query_state, self.attention_vec_size)
             y = tf.reshape(y, [-1, 1, 1, self.attention_vec_size])
 
+            #pylint: disable=invalid-name
+            # code copied from tensorflow. Suggestion: rename the variables
+            # according to the Bahdanau paper
             s = self.get_logits(y)
 
             if self.input_weights is None:
@@ -128,15 +91,11 @@ class Attention(object):
         # Attention mask is a softmax of v^T * tanh(...).
         return tf.reduce_sum(self.v * tf.tanh(self.hidden_features + y), [2, 3])
 
-    def initialize(self, batch_size, dtype):
-        batch_attn_size = tf.pack([batch_size, self.attn_size])
-        initial = tf.zeros(batch_attn_size, dtype=dtype)
-        # Ensure the second shape of attention vectors is set.
-        initial.set_shape([None, self.attn_size])
-        return initial
-
 
 class CoverageAttention(Attention):
+
+    # pylint: disable=too-many-arguments
+    # Great objects require great number of parameters
     def __init__(self, attention_states, scope, dropout_placeholder,
                  input_weights=None, max_fertility=5):
 

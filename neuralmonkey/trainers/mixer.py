@@ -2,6 +2,7 @@ import tensorflow as tf
 
 from neuralmonkey.logging import log
 from neuralmonkey.evaluators.bleu import BLEUEvaluator
+from neuralmonkey.trainers.cross_entropy_trainer import l2_cost
 
 # tests: mypy
 # TODO refactor to have the same API as cross-entropy trainer
@@ -16,7 +17,8 @@ class Mixer(object):
     starts to use the reinforce algorithm for the optimization.
 
     """
-    def __init__(self, decoder, initial_trainer, xent_calls, moving_calls, learning_rate):
+    def __init__(self, decoder, initial_trainer, xent_calls, moving_calls,
+                 l2_regularization=0, learning_rate=1e-4, optimizer=None, clip_norm=None):
         """
         Constructs the TensorFlow graph for the MIXER code - i.e. the regressor
         estimating BLEU from hidden states and the gradients from the REINFORCE
@@ -84,8 +86,10 @@ class Mixer(object):
                         expected_rewards, decoder.train_logits, indicator, decoder.train_weights)]
                 ## ^^^ list of  [1 x vocabulary] tensors
 
+                # TODO add l2 regularization here
+
                 # this derivatives are constant for us now, we don't really
-                # want to propagate the dradient back to this computaiton
+                # want to propagate the gradient back to this computation
                 derivatives_stopped = [tf.stop_gradient(d) for d in derivatives]
 
                 # we must train the regressor independently
@@ -106,13 +110,15 @@ class Mixer(object):
                     for l, t, w in zip(decoder.train_logits, decoder.train_targets, decoder.train_weights)
                 ]
                     ## ^^^ list of scalars in time
+                if l2_regularization > 0:
+                    cross_entropies += l2_cost(l2_regularization, trainable_vars)
 
                 xent_gradients = [tf.gradients(e, trainable_vars) for e in cross_entropies]
                 log("Cross-entropy gradients computed")
 
             self.mixer_weights_plc = [tf.placeholder(tf.float32, []) for _ in hidden_states]
 
-            mixed_gradients = [] # a list for each of the traininable variables
+            mixed_gradients = [] # a list for each of the trainable variables
 
             for i, (rgs, xent_gs, mix_w) in enumerate(
                     zip(reinforce_gradients, xent_gradients, self.mixer_weights_plc)):
@@ -126,7 +132,7 @@ class Mixer(object):
                     elif xent_g is None:
                         continue
                     else:
-                        raise Exception("Unnkown type of gradients: {}".format(type(xg)))
+                        raise Exception("Unnkown type of gradients: {}".format(type(xent_g)))
 
                     if i == 0:
                         mixed_gradients.append(g)
@@ -136,8 +142,18 @@ class Mixer(object):
                         else:
                             mixed_gradients[j] += g
 
-            self.mixer_optimizer = \
-                    tf.train.AdamOptimizer(self.learning_rate).apply_gradients(list(zip(mixed_gradients, trainable_vars)))
+            if optimizer is None:
+                self.mixer_optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            else:
+                self.mixer_optimize = optimizer
+
+            gradients = list(zip(mixed_gradients, trainable_vars))
+
+            if clip_norm is not None:
+                gradients = [(tf.clip_by_norm(grad, clip_norm), var)
+                             for grad, var in gradients]
+
+            self.mixer_optimize_op = optimizer.apply_gradients(gradients, global_step=decoder.learning_step)
 
         #self.summary_gradients = tf.merge_summary(tf.get_collection("summary_gradients"))
         self.summary_train = summary_train = tf.merge_summary(tf.get_collection("summary_train"))
@@ -177,12 +193,12 @@ class Mixer(object):
 
         if verbose:
             computation = sess.run(
-                [self.mixer_optimizer, self.decoder.runtime_loss,
+                [self.mixer_optimize_op, self.decoder.runtime_loss,
                  self.decoder.train_loss, self.summary_train]
                 + self.decoder.decoded,
                 feed_dict=fd)
         else:
-            computation = sess.run([self.mixer_optimizer], feed_dict=fd)
+            computation = sess.run([self.mixer_optimize_op], feed_dict=fd)
 
         sess.run(self.regression_optimizer, feed_dict=fd)
 

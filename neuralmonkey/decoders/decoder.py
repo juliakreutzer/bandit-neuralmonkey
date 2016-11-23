@@ -1,11 +1,9 @@
 #tests: lint
 
-import math
 import tensorflow as tf
 import numpy as np
 
 from neuralmonkey.vocabulary import START_TOKEN
-from neuralmonkey.decoding_function import attention_decoder
 from neuralmonkey.logging import log
 
 class Decoder(object):
@@ -13,7 +11,7 @@ class Decoder(object):
     used for the decoding.
     """
 
-    # pylint: disable=too-many-instance-attributes,too-many-locals
+    # pylint: disable=too-many-instance-attributes,too-many-locals,too-many-statements
     # Big decoder cannot be simpler. Not sure if refactoring
     # it into smaller units would be helpful
     # Some locals may be turned to attributes
@@ -67,6 +65,10 @@ class Decoder(object):
         if self.project_encoder_outputs or len(self.encoders) == 0:
             self.rnn_size = kwargs.get("rnn_size", 200)
         else:
+            if "rnn_size" in kwargs:
+                log("Warning: rnn_size attribute will not be used "
+                    "without encoder projection!", color="red")
+
             self.rnn_size = sum(e.encoded.get_shape()[1].value
                                 for e in self.encoders)
 
@@ -78,7 +80,8 @@ class Decoder(object):
 
         state = self._initial_state()
 
-        self.weights, self.biases = self._state_to_output()
+        self.weights, self.biases = self._rnn_output_proj_params()
+
         self.embedding_matrix = self._input_embeddings()
 
         self.train_inputs, self.train_weights = self._training_placeholders()
@@ -87,32 +90,30 @@ class Decoder(object):
         self.go_symbols = tf.placeholder(tf.int32, shape=[None],
                                          name="decoder_go_symbols")
 
-        cell = self._get_rnn_cell()
-        attention_objects = self._collect_attention_objects(self.encoders)
-
         ### Construct the computation part of the graph
 
         embedded_train_inputs = self._embed_inputs(self.train_inputs[:-1])
 
-        self.train_rnn_outputs, _ = attention_decoder(
-            embedded_train_inputs, state, attention_objects,
-            self.embedding_size, cell)
+        self.train_rnn_outputs, _ = self._attention_decoder(
+            embedded_train_inputs, state)
 
         # runtime methods and objects are used when no ground truth is provided
         # (such as during testing)
         runtime_inputs = self._runtime_inputs(self.go_symbols)
-        loop_function = self._get_loop_function()
 
         ### Use the same variables for runtime decoding!
         tf.get_variable_scope().reuse_variables()
 
-        self.runtime_rnn_states = [state]
+        self.runtime_rnn_outputs, self.runtime_rnn_states = \
+            self._attention_decoder(
+                runtime_inputs, state, runtime_mode=True,
+                summary_collections=["summary_val_plots"])
 
-        self.runtime_rnn_outputs, rnn_states = attention_decoder(
-            runtime_inputs, state, attention_objects, self.embedding_size,
-            cell, loop_function=loop_function)
-
-        self.runtime_rnn_states += rnn_states
+        val_plots_collection = tf.get_collection("summary_val_plots")
+        self.summary_val_plots = (
+            tf.merge_summary(val_plots_collection)
+            if val_plots_collection else None
+        )
 
         _, self.train_logits = self._decode(self.train_rnn_outputs)
         self.decoded, self.runtime_logits = self._decode(self.runtime_rnn_outputs)
@@ -125,7 +126,12 @@ class Decoder(object):
             self.runtime_logits, self.train_targets, self.train_weights,
             self.vocabulary_size)
 
+        self.cross_entropies = tf.nn.seq2seq.sequence_loss_by_example(
+            self.train_logits, self.train_targets, self.train_weights,
+            self.vocabulary_size)
+
         self.runtime_logprobs = [tf.nn.log_softmax(l) for l in self.runtime_logits]
+
 
         ### Learning step
         ### TODO was here only because of scheduled sampling.
@@ -159,7 +165,6 @@ class Decoder(object):
         return [tf.nn.top_k(p, k_best) for p in self.runtime_logprobs]
 
 
-
     def _initial_state(self):
         """Create the initial state of the decoder."""
         if len(self.encoders) == 0:
@@ -175,22 +180,23 @@ class Decoder(object):
 
     def _encoder_projection(self, encoded_states):
         """Creates a projection of concatenated encoder states
+        and applies a tanh activation
 
         Arguments:
             encoded_states: Tensor of concatenated states of input encoders
                             (batch x sum(states))
         """
-
         input_size = encoded_states.get_shape()[1].value
         output_size = self.rnn_size
 
-        weights = tf.get_variable("encoder_projection_W", [input_size,
-                                                           output_size])
-        biases = tf.Variable(tf.zeros([output_size]),
-                             name="encoder_projection_b")
+        weights = tf.get_variable(
+            "encoder_projection_W", [input_size, output_size])
+        biases = tf.get_variable(
+            "encoder_projection_b",
+            initializer=tf.zeros_initializer([output_size]))
 
         dropped_input = self._dropout(encoded_states)
-        return tf.matmul(dropped_input, weights) + biases
+        return tf.tanh(tf.matmul(dropped_input, weights) + biases)
 
 
     def _dropout(self, var):
@@ -202,20 +208,6 @@ class Decoder(object):
         return tf.nn.dropout(var, self.dropout_placeholder)
 
 
-    def _state_to_output(self):
-        """Create variables for projection of states to output vectors"""
-
-        weights = tf.Variable(
-            tf.random_uniform([self.rnn_size, self.vocabulary_size], -0.5, 0.5),
-            name="state_to_word_W")
-
-        biases = tf.Variable(
-            tf.fill([self.vocabulary_size], - math.log(self.vocabulary_size)),
-            name="state_to_word_b")
-
-        return weights, biases
-
-
     def _input_embeddings(self):
         """Create variables and operations for embedding of input words
 
@@ -225,10 +217,8 @@ class Decoder(object):
         if self.reuse_word_embeddings:
             return self.encoders[0].word_embeddings
 
-        return tf.Variable(
-            tf.random_uniform([self.vocabulary_size, self.embedding_size],
-                              -0.5, 0.5),
-            name="word_embeddings")
+        return tf.get_variable(
+            "word_embeddings", [self.vocabulary_size, self.embedding_size])
 
 
     def _training_placeholders(self):
@@ -245,22 +235,35 @@ class Decoder(object):
         return inputs, weights
 
 
+    def _rnn_output_proj_params(self):
+        """Create parameters for projection of RNN outputs to vocabulary
+        indices.
+
+        This method should provide parameter shapes compatible with whatever
+        the _get_rnn_output method is returning.
+        """
+        ctx_sizes = [a.attn_size for a in self._collect_attention_objects()]
+        state_size = self.rnn_size + self.embedding_size + sum(ctx_sizes)
+
+        weights = tf.get_variable(
+            "state_to_word_W", [state_size, self.vocabulary_size])
+        biases = tf.get_variable(
+            "state_to_word_b",
+            initializer=tf.zeros_initializer([self.vocabulary_size]))
+
+        return weights, biases
+
+
     def _get_rnn_cell(self):
         """Returns a RNNCell object for this decoder"""
-
         return tf.nn.rnn_cell.GRUCell(self.rnn_size)
 
 
-    def _collect_attention_objects(self, encoders):
-        """Collect attention objects of the given encoders
-
-        Arguments:
-            encoders: Encoders from which to take attention objects
-        """
-        if self.use_attention:
-            return [e.attention_object for e in encoders if e.attention_object]
-        else:
+    def _collect_attention_objects(self):
+        """Collect attention objects from encoders."""
+        if not self.use_attention:
             return []
+        return [e.attention_object for e in self.encoders if e.attention_object]
 
 
     def _embed_inputs(self, inputs):
@@ -288,44 +291,122 @@ class Decoder(object):
         return inputs
 
 
-    def _get_loop_function(self):
-        """Constructs a loop function for the decoder"""
+    def _loop_function(self, rnn_output):
+        """Basic loop function. Projects state to logits, take the
+        argmax of the logits, embed the word and perform dropout on the
+        embedding vector.
 
-        def basic_loop(previous_state, _):
-            """Basic loop function. Projects state to logits, take the
-            argmax of the logits, embed the word and perform dropout on the
-            embedding vector.
-
-            Arguments:
-                previous_state: The state of the decoder
-                i: Unused argument, number of the time step
-            """
-            output_activation = self._logit_function(previous_state)
-            previous_word = tf.argmax(output_activation, 1)
-            input_embedding = tf.nn.embedding_lookup(self.embedding_matrix,
-                                                     previous_word)
-
-            return self._dropout(input_embedding)
-
-        return basic_loop
+        Arguments:
+            rnn_output: The output of the decoder RNN
+        """
+        output_activation = self._logit_function(rnn_output)
+        previous_word = tf.argmax(output_activation, 1)
+        input_embedding = tf.nn.embedding_lookup(self.embedding_matrix,
+                                                 previous_word)
+        return self._dropout(input_embedding)
 
 
     def _logit_function(self, rnn_output):
         """Compute logits on the vocabulary given the state
 
         Arguments:
-            state: the state of the decoder
+            rnn_output: the output of the decoder RNN
         """
         return tf.matmul(self._dropout(rnn_output), self.weights) + self.biases
+
+    #pylint: disable=too-many-arguments
+    # TODO reduce the number of arguments
+    def _attention_decoder(self, inputs, initial_state, runtime_mode=False,
+                           summary_collections=None, scope="attention_decoder"):
+        """Run the decoder RNN.
+
+        Arguments:
+            inputs: The decoder inputs. If runtime_mode=True, only the first
+                    input is used.
+            initial_state: The initial state of the decoder.
+            runtime_mode: Boolean flag whether the decoder is running in
+                          runtime mode (with loop function).
+            summary_collections: The list of summary collections to which
+                                 the alignments are logged.
+            scope: The variable scope to use with this function.
+        """
+        cell = self._get_rnn_cell()
+        att_objects = self._collect_attention_objects()
+
+        ## Broadcast the initial state to the whole batch if needed
+        if len(initial_state.get_shape()) == 1:
+            assert initial_state.get_shape()[0].value == self.rnn_size
+            initial_state = tf.reshape(
+                tf.tile(initial_state, tf.shape(inputs[0])[:1]),
+                [-1, self.rnn_size])
+
+        with tf.variable_scope(scope):
+
+            ## First decoding step
+            contexts = [a.attention(initial_state) for a in att_objects]
+            output = self._get_rnn_output(inputs[0], initial_state, contexts)
+            _, state = cell(tf.concat(1, [inputs[0]] + contexts), initial_state)
+
+            rnn_outputs = [output]
+            rnn_states = [initial_state, state]
+
+            for step in range(1, len(inputs)):
+                tf.get_variable_scope().reuse_variables()
+
+                if runtime_mode:
+                    current_input = self._loop_function(output)
+                else:
+                    current_input = inputs[step]
+
+                ## N-th decoding step
+                contexts = [a.attention(state) for a in att_objects]
+                output = self._get_rnn_output(current_input, state, contexts)
+                _, state = cell(tf.concat(1, [current_input] + contexts), state)
+
+                rnn_outputs.append(output)
+                rnn_states.append(state)
+
+            if summary_collections:
+                for i, a in enumerate(att_objects):
+                    attentions = a.attentions_in_time[-len(inputs):]
+                    alignments = tf.expand_dims(tf.transpose(
+                        tf.pack(attentions), perm=[1, 2, 0]), -1)
+
+                    tf.image_summary("attention_{}".format(i), alignments,
+                                     collections=summary_collections,
+                                     max_images=256)
+
+        return rnn_outputs, rnn_states
+
+
+    # pylint: disable=no-self-use
+    # TODO refactor out of this class to a helper module
+    def _get_rnn_output(self, prev_state, prev_output, ctx_tensors):
+        """Compute RNN output out of the previous state and output, and the
+        context tensors returned from attention mechanisms.
+
+        This function corresponds to the equations for computation the
+        t_tilde in the Bahdanau et al. (2015) paper, on page 14,
+        **before** the linear projection.
+
+        Arguments:
+            prev_state: Previous decoder RNN state. (Denoted s_i-1)
+            prev_output: Embedded output of the previous step. (y_i-1)
+            ctx_tensors: Context tensors computed by the attentions. (c_i)
+
+        Returns:
+            In this decoder, this function just concatenates all the inputs.
+        """
+        return tf.concat(1, [prev_state, prev_output] + ctx_tensors)
 
 
     def _decode(self, rnn_outputs):
         """Decodes a sequence from a list of hidden states
 
         Arguments:
-            rnn_states: hidden states
+            rnn_outputs: List of batch x maxout_size tensors
         """
-        logits = [self._logit_function(o) for o in rnn_outputs]
+        logits = [self._logit_function(s) for s in rnn_outputs]
         decoded = [tf.argmax(l[:, 1:], 1) + 1 for l in logits]
 
         return decoded, logits
