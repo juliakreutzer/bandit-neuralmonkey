@@ -164,6 +164,15 @@ class Decoder(object):
         ## the array is of tuples ([values], [indices])
         return [tf.nn.top_k(p, k_best) for p in self.runtime_logprobs]
 
+    def sample_singleton(self, k, n):
+        """ Sample k target word indices and their log probabilities from the softmax distribution
+
+        Arguments:
+            k: How many outputs to sample
+        """
+        sample_ids = tf.cast(tf.multinomial(self.runtime_logprobs[n], k), tf.int32) # TODO define seed, shape [batch_size, num_samples]
+        sample_logprobs = tf.gather_nd(self.runtime_logprobs[n][0], sample_ids[0])  # non batch
+        return sample_logprobs, tf.squeeze(sample_ids[0])
 
     def _initial_state(self):
         """Create the initial state of the decoder."""

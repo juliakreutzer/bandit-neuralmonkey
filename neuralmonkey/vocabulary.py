@@ -418,6 +418,10 @@ class Vocabulary(collections.Sized):
         with open(path, 'wb') as f_pickle:
             pickle.dump(self, f_pickle)
 
+    def hypothesis_to_sentence(self, hypothesis):
+        """Returns the hypothesis in actual words"""
+        return [self.index_to_word[token] for token in hypothesis.tokens]
+
 
     def log_sample(self, size: int=5):
         """Logs a sample of the vocabulary

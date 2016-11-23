@@ -62,7 +62,6 @@ class BeamSearchRunner(object):
             for encoder in coders:
                 if isinstance(encoder, SentenceEncoder):
                     fetches += encoder.outputs_bidi_t
-                    #fetches += encoder.attention_tensor
 
             computation = sess.run(fetches, feed_dict=feed_dict)
 

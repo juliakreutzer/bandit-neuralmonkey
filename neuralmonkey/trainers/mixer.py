@@ -68,6 +68,7 @@ class Mixer(object):
             ##   contains vocabulary indices (argmaxs)
             with tf.variable_scope("reinforce_gradients"):
                 # this is a dirty trick to get the indices of maxima in the logits
+                # TODO actually sample here
                 max_logits = \
                     [tf.expand_dims(tf.reduce_max(l, 1), 1) \
                         for l in decoder.train_logits] ## batch x 1 x 1  
@@ -84,6 +85,10 @@ class Mixer(object):
                         0, keep_dims=True)
                     for r, l, i, w in zip(
                         expected_rewards, decoder.train_logits, indicator, decoder.train_weights)]
+
+                # TODO: InvalidArgumentError (see above for traceback): Incompatible shapes: [128,9559] vs. [128]
+                #[[Node: mixer/reinforce_gradients/mul_1 = Mul[T=DT_FLOAT, _device="/job:localhost/replica:0/task:0/gpu:0"](mixer/reinforce_gradients/mul, _recv_decoder_padding_weights_0_0/_4371)]]
+
                 ## ^^^ list of  [1 x vocabulary] tensors
 
                 # TODO add l2 regularization here
