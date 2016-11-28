@@ -4,8 +4,10 @@ import numpy as np
 from neuralmonkey.logging import log
 from neuralmonkey.nn.noisy_gru_cell import NoisyGRUCell
 from neuralmonkey.nn.pervasive_dropout_wrapper import PervasiveDropoutWrapper
+from neuralmonkey.nn.ortho_gru_cell import OrthoGRUCell
 from neuralmonkey.checking import assert_type
 from neuralmonkey.vocabulary import Vocabulary
+
 
 # tests: mypy
 
@@ -50,8 +52,10 @@ class SentenceEncoder(object):
             if parent_encoder:
                 self.word_embeddings = parent_encoder.word_embeddings
             else:
-                self.word_embeddings = tf.Variable(tf.random_uniform(
-                    [len(vocabulary), embedding_size], -1.0, 1.0))
+                # NOTE the same note as in decoder when initializing embeddings
+                self.word_embeddings = tf.get_variable(
+                    "word_embeddings", shape=[len(vocabulary), embedding_size],
+                    initializer=tf.random_normal_initializer(stddev=0.01))
 
             embedded_inputs = tf.nn.embedding_lookup(self.word_embeddings, self.inputs)
             dropped_embedded_inputs = tf.nn.dropout(embedded_inputs, self.dropout_placeholder)
@@ -65,8 +69,8 @@ class SentenceEncoder(object):
                     self.backward_gru = NoisyGRUCell(rnn_size, self.is_training)
                 else:
                     ### this is used most of the time...
-                    self.forward_gru = tf.nn.rnn_cell.GRUCell(rnn_size)
-                    self.backward_gru = tf.nn.rnn_cell.GRUCell(rnn_size)
+                    self.forward_gru = OrthoGRUCell(rnn_size)
+                    self.backward_gru = OrthoGRUCell(rnn_size)
 
             if use_pervasive_dropout:
 

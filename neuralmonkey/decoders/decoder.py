@@ -3,6 +3,7 @@
 import tensorflow as tf
 import numpy as np
 
+from neuralmonkey.nn.ortho_gru_cell import OrthoGRUCell
 from neuralmonkey.vocabulary import START_TOKEN
 from neuralmonkey.logging import log
 
@@ -62,6 +63,13 @@ class Decoder(object):
 
         log("Initializing decoder, name: '{}'".format(self.name))
 
+        ### Learning step
+        ### TODO was here only because of scheduled sampling.
+        ### needs to be refactored out
+        self.learning_step = tf.get_variable(
+            "learning_step", [], initializer=tf.constant_initializer(0),
+            trainable=False)
+
         if self.project_encoder_outputs or len(self.encoders) == 0:
             self.rnn_size = kwargs.get("rnn_size", 200)
         else:
@@ -115,8 +123,13 @@ class Decoder(object):
             if val_plots_collection else None
         )
 
+
         _, self.train_logits = self._decode(self.train_rnn_outputs)
         self.decoded, self.runtime_logits = self._decode(self.runtime_rnn_outputs)
+
+        self.train_logprobs = [tf.nn.log_softmax(l) for l in self.train_logits]
+        self.runtime_logprobs = [tf.nn.log_softmax(l) for l in self.runtime_logits]
+
 
         self.train_loss = tf.nn.seq2seq.sequence_loss(
             self.train_logits, self.train_targets, self.train_weights,
@@ -129,15 +142,6 @@ class Decoder(object):
         self.cross_entropies = tf.nn.seq2seq.sequence_loss_by_example(
             self.train_logits, self.train_targets, self.train_weights,
             self.vocabulary_size)
-
-        self.runtime_logprobs = [tf.nn.log_softmax(l) for l in self.runtime_logits]
-
-
-        ### Learning step
-        ### TODO was here only because of scheduled sampling.
-        ### needs to be refactored out
-        self.learning_step = tf.Variable(0, name="learning_step",
-                                         trainable=False)
 
         ### Summaries
         self._init_summaries()
@@ -199,7 +203,9 @@ class Decoder(object):
         output_size = self.rnn_size
 
         weights = tf.get_variable(
-            "encoder_projection_W", [input_size, output_size])
+            "encoder_projection_W", [input_size, output_size],
+            initializer=tf.random_normal_initializer(stddev=0.01))
+
         biases = tf.get_variable(
             "encoder_projection_b",
             initializer=tf.zeros_initializer([output_size]))
@@ -226,8 +232,14 @@ class Decoder(object):
         if self.reuse_word_embeddings:
             return self.encoders[0].word_embeddings
 
+        # NOTE In the Bahdanau paper, they say they initialized some weights
+        # as orthogonal matrices, some by sampling from gauss distro with
+        # stddev=0.001 and all other weight matrices as gaussian with
+        # stddev=0.01. Embeddings were not among any of the special cases so
+        # I assume that they initialized them as any other weight matrix.
         return tf.get_variable(
-            "word_embeddings", [self.vocabulary_size, self.embedding_size])
+            "word_embeddings", [self.vocabulary_size, self.embedding_size],
+            initializer=tf.random_normal_initializer(stddev=0.01))
 
 
     def _training_placeholders(self):
@@ -255,7 +267,9 @@ class Decoder(object):
         state_size = self.rnn_size + self.embedding_size + sum(ctx_sizes)
 
         weights = tf.get_variable(
-            "state_to_word_W", [state_size, self.vocabulary_size])
+            "state_to_word_W", [state_size, self.vocabulary_size],
+            initializer=tf.random_normal_initializer(stddev=0.01))
+
         biases = tf.get_variable(
             "state_to_word_b",
             initializer=tf.zeros_initializer([self.vocabulary_size]))
@@ -265,7 +279,7 @@ class Decoder(object):
 
     def _get_rnn_cell(self):
         """Returns a RNNCell object for this decoder"""
-        return tf.nn.rnn_cell.GRUCell(self.rnn_size)
+        return OrthoGRUCell(self.rnn_size)
 
 
     def _collect_attention_objects(self):
@@ -472,6 +486,11 @@ class Decoder(object):
 
             for placeholder, tensor in zip(self.train_inputs, inputs):
                 fd[placeholder] = tensor
+        else:
+            fd[self.train_inputs[0]] = np.repeat(start_token_index,
+                                                 len(dataset))
+            for placeholder in self.train_weights:
+                fd[placeholder] = np.ones(len(dataset))
 
         if not train:
             fd[self.dropout_placeholder] = 1.0
