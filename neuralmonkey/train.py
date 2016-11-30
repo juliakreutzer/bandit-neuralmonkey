@@ -4,6 +4,7 @@ This is a training script for sequence to sequence learning.
 # tests: lint, mypy
 
 import sys
+import random
 import os
 from shutil import copyfile
 
@@ -34,11 +35,10 @@ def create_config(config_file):
     config.add_argument('save_n_best', int, required=False, default=1)
     config.add_argument('logging_period', int, required=False, default=20)
     config.add_argument('validation_period', int, required=False, default=500)
+    config.add_argument('runners_batch_size', int, required=False, default=None)
     config.add_argument('minimize', bool, required=False, default=False)
     config.add_argument('postprocess')
-
     config.add_argument('name', str)
-    config.add_argument('random_seed', int, required=False)
     config.add_argument('initial_variables', str, required=False, default=[])
     config.add_argument('overwrite_output_dir', bool, required=False,
                         default=False)
@@ -51,6 +51,7 @@ def main():
         exit(1)
 
     # random seeds have to be set before anything is created in the graph
+    random.seed(2574600)
     np.random.seed(2574600)
     tf.set_random_seed(2574600)
 
@@ -58,10 +59,7 @@ def main():
 
     print("")
 
-    #pylint: disable=no-member,broad-except
-    if args.random_seed is not None:
-        tf.set_random_seed(args.random_seed)
-
+    #pylint: disable=no-member
     if os.path.isdir(args.output) and \
             os.path.exists(os.path.join(args.output, "experiment.ini")):
         if args.overwrite_output_dir:
@@ -84,6 +82,7 @@ def main():
         log(str(exc), color='red')
         exit(1)
 
+    #pylint: disable=broad-except
     if not os.path.isdir(args.output):
         try:
             os.mkdir(args.output)
