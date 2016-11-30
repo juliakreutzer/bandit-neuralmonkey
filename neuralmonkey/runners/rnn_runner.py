@@ -26,9 +26,16 @@ from neuralmonkey.vocabulary import END_TOKEN_INDEX
 BeamBatch = NamedTuple('BeamBatch',
                        [('decoded', np.ndarray),
                         ('logprobs', np.ndarray)])
+SampleBatch = NamedTuple('SampleBatch',
+                       [('decoded', np.ndarray),
+                        ('logprobs', np.ndarray)])
 ExpandedBeamBatch = NamedTuple('ExpandedBeamBatch',
                                [('beam_batch', BeamBatch),
                                 ('next_logprobs', np.ndarray)])
+ExpandedSampleBatch = NamedTuple('ExpandedSampleBatch',
+                               [('sample_batch', SampleBatch),
+                                ('next_logprobs', np.ndarray)])
+
 ScoringFunction = Callable[[np.ndarray, np.ndarray], np.ndarray]
 
 # pylint: disable=too-many-locals
@@ -43,16 +50,25 @@ def _n_best_indices(scores: np.ndarray, n: int) -> np.ndarray:
         np.argsort(scores[unsorted_n_best_indices])]
     return n_best_indices
 
+def _sample_indices(scores: np.ndarray, k: int) -> np.ndarray:
+    all_indices = np.arange(scores.shape[0])
+    # scores are logprobs, transform to probs  # TODO make nicer
+    #print(scores)  # TODO sometimes they are weird, especially after longer training
+    #print(np.sum(np.exp(scores)))
+    renorm_scores = np.exp(scores)/np.sum(np.exp(scores))  # try already in log space
+    #print(np.sum(renorm_scores))
+    sample_indices = np.random.choice(all_indices, size=k, p=renorm_scores)
+    return sample_indices
 
-def _score_expanded(n: int,
-                    batch_size: int,
-                    expanded: List[ExpandedBeamBatch],
-                    scoring_function: ScoringFunction) -> \
+def _score_expanded_beams(n: int,
+                          batch_size: int,
+                          expanded: List[ExpandedBeamBatch],
+                          scoring_function: ScoringFunction) -> \
         Tuple[List[np.ndarray], List[np.ndarray]]:
     """Score expanded beams.
 
     After all hypotheses have their possible continuations, we need to score
-    the expanded hypotheses. We collect all possible conitnuations (typically
+    the expanded hypotheses. We collect all possible continuations (typically
     `n`-times size of the voabulary), score them using `scoring_function` and
     keep only `n` with the highest scores.
 
@@ -112,6 +128,75 @@ def _score_expanded(n: int,
     return next_beam_hypotheses, next_beam_logprobs
 
 
+def _score_expanded_samples(k: int,
+                          batch_size: int,
+                          expanded: List[ExpandedSampleBatch],
+                          scoring_function: ScoringFunction) -> \
+        Tuple[List[np.ndarray], List[np.ndarray]]:
+    """Score expanded samples.
+
+    After all hypotheses have their possible continuations, we need to score
+    the expanded hypotheses. We collect all possible continuations (typically
+    `k`-times size of the vocabulary), score them using `scoring_function` and
+    keep only `k` with the highest scores.
+
+    Args:
+        k: Number of samples.
+        batch_size: Number hypotheses in the batch.
+        expanded: List of expanded hypotheses from the previous samples, organized
+            into batches.
+        scoring_function: A function that scores the expanded hypotheses based
+            on the hypotheses and individual words' log-probs.
+
+    Returns:
+        Hypotheses indices and logprobs for the next decoding step.
+    """
+    next_sample_hypotheses = []
+    next_sample_logprobs = []
+    # agregate the expanded hypotheses hypothesis-wise
+    for rank in range(batch_size):
+        candidate_scores = None
+        candidate_hypotheses = None
+        candidate_logprobs = None
+
+        for expanded_batch in expanded:  # TODO is always 1
+            next_distribution = expanded_batch.next_logprobs[rank]
+            if expanded_batch.sample_batch is None:
+                expanded_hypotheses = np.expand_dims(np.arange(
+                    len(next_distribution)), axis=1)
+                expanded_logprobs = np.expand_dims(next_distribution, 1)
+            else:
+                hypothesis = expanded_batch.sample_batch.decoded[rank]
+                prev_logprobs = expanded_batch.sample_batch.logprobs[rank]
+
+                expanded_hypotheses = np.array(
+                    [np.append(hypothesis, index)
+                     for index, _ in enumerate(next_distribution)])
+                expanded_logprobs = np.array(
+                    [np.append(prev_logprobs, logprob)
+                     for logprob in next_distribution])
+
+            assert expanded_hypotheses.shape == expanded_logprobs.shape
+            scores = scoring_function(expanded_hypotheses, expanded_logprobs)
+            assert scores.shape[0] == expanded_hypotheses.shape[0]
+            sample_indices = _sample_indices(scores, k)
+            candidate_scores = _try_append(
+                candidate_scores, scores[sample_indices])
+            candidate_hypotheses = _try_append(
+                candidate_hypotheses, expanded_hypotheses[sample_indices])
+            candidate_logprobs = _try_append(
+                candidate_logprobs, expanded_logprobs[sample_indices])
+
+        # TODO why again?
+        sample_indices = _sample_indices(candidate_scores, k)
+        sample_hypotheses = candidate_hypotheses[sample_indices]
+        sample_logprobs = candidate_logprobs[sample_indices]
+
+        next_sample_hypotheses.append(sample_hypotheses)
+        next_sample_logprobs.append(sample_logprobs)
+    return next_sample_hypotheses, next_sample_logprobs
+
+
 def _try_append(first, second):
     if first is None:
         return second
@@ -121,7 +206,26 @@ def _try_append(first, second):
 
 
 def likelihood_beam_score(decoded, logprobs):
-    """Score the beam by normalized probaility."""
+    """Score the beam by normalized probability."""
+
+    mask = []
+    for hypothesis in decoded:
+        before_end = True
+        hyp_mask = []
+        for index in hypothesis:
+            hyp_mask.append(float(before_end))
+            before_end &= (index != END_TOKEN_INDEX)
+        mask.append(hyp_mask)
+
+    mask_matrix = np.array(mask)
+    masked_logprobs = mask_matrix * logprobs
+    # pylint: disable=no-member
+    avg_logprobs = masked_logprobs.sum(
+        axis=1) - np.log(mask_matrix.sum(axis=1))
+    return avg_logprobs
+
+def likelihood_sample_score(decoded, logprobs):
+    """Score the sample set by normalized probability."""
 
     mask = []
     for hypothesis in decoded:
@@ -145,10 +249,10 @@ def n_best(n: int,
            scoring_function) -> List[BeamBatch]:
     """Take n-best from expanded beam search hypotheses.
 
-    To do the scoring we need to "reshape" the hypohteses. Before the scoring
+    To do the scoring we need to "reshape" the hypotheses. Before the scoring
     the hypothesis are split into beam batches by their position in the beam.
     To do the scoring, however, they need to be organized by the instances.
-    After the scoring, only _n_ hypotheses is kept for each isntance. These
+    After the scoring, only _n_ hypotheses is kept for each instance. These
     are again split by their position in the beam.
 
     Args:
@@ -162,7 +266,7 @@ def n_best(n: int,
     """
 
     batch_size = expanded[0].next_logprobs.shape[0]
-    next_beam_hypotheses, next_beam_logprobs = _score_expanded(
+    next_beam_hypotheses, next_beam_logprobs = _score_expanded_beams(
         n, batch_size, expanded, scoring_function)
 
     # now cut the beams by hypotheses rank
@@ -174,6 +278,155 @@ def n_best(n: int,
 
     return beam_batches
 
+def sample(k: int,
+           expanded: List[ExpandedSampleBatch],
+           scoring_function) -> List[SampleBatch]:
+    """Take k samples from expanded beam search hypotheses.
+
+    To do the scoring we need to "reshape" the hypotheses. Before the scoring
+    the hypothesis are split into sample batches by their position in the beam.
+    To do the scoring, however, they need to be organized by the instances.
+    After the scoring, only _k_ hypotheses is kept for each instance. These
+    are again split by their position in the beam.
+
+    Args:
+        k: Sample size.
+        expanded: List of batched expanded hypotheses.
+        scoring_function: A function
+
+    Returns:
+        List of SampleBatches ready for new expansion.
+
+    """
+    # TODO change docu
+
+    batch_size = expanded[0].next_logprobs.shape[0]
+    next_sample_hypotheses, next_sample_logprobs = _score_expanded_samples(
+        k, batch_size, expanded, scoring_function)
+
+    # now cut the beams by hypotheses rank
+    # TODO necessary?
+    sample_batches = []
+    for rank in range(k):
+        hypotheses = np.array([sample[rank] for sample in next_sample_hypotheses])
+        logprobs = np.array([sample[rank] for sample in next_sample_logprobs])
+        sample_batches.append(SampleBatch(hypotheses, logprobs))
+
+    return sample_batches
+
+
+class RuntimeRnnSampler(BaseRunner):
+    """Instead of beam search, sample hypotheses step by step"""
+
+    def __init__(self, output_series, decoder,
+                 sample_size=1, sample_scoring_f=likelihood_sample_score):
+        super(RuntimeRnnSampler, self).__init__(output_series, decoder)
+
+        self._initial_fetches = [decoder.runtime_rnn_states[0]]
+        self._initial_fetches += [e.encoded for e in self.all_coders
+                                  if hasattr(e, 'encoded')]
+        self._sample_size = sample_size
+        self._sample_scoring_f = sample_scoring_f
+
+    def get_executable(self, train=False, summaries=True):
+
+        return RuntimeRnnSamplerExecutable(self.all_coders, self._decoder,
+                                    self._initial_fetches,
+                                    self._decoder.vocabulary,
+                                    sample_size=self._sample_size,
+                                    sample_scoring_f=self._sample_scoring_f,
+                                    compute_loss=train)
+
+    @property
+    def loss_names(self) -> List[str]:
+        return ["runtime_xent"]
+
+class RuntimeRnnSamplerExecutable(Executable):
+    """Run and ensemble the RNN decoder step by step."""
+    def __init__(self, all_coders, decoder, initial_fetches, vocabulary,
+                 sample_scoring_f, sample_size=1,
+                 compute_loss=True):
+        self._all_coders = all_coders
+        self._decoder = decoder
+        self._vocabulary = vocabulary
+        self._initial_fetches = initial_fetches
+        self._compute_loss = compute_loss
+        self._sample_size = sample_size
+        self._sample_scoring_f = sample_scoring_f
+
+        self._to_expand = [None]  # type: List[Option[SampleBatch]]
+        self._current_sample_batch = None
+        self._expanded = []  # type: List[ExpandedSampleBatch]
+        self._time_step = 0
+
+        self.result = None  # type: Option[ExecutionResult]
+
+    def next_to_execute(self) -> NextExecute:
+        """Get the feedables and tensors to run.
+
+        It takes a sample batch that should be expanded the next and preprare an
+        additional feed_dict based on the hypotheses history.
+        """
+
+        if self.result is not None:
+            raise Exception(
+                "Nothing to execute, if there is already a result.")
+
+        to_run = {'logprobs': self._decoder.train_logprobs[self._time_step]}
+
+        self._current_sample_batch = self._to_expand.pop()
+
+        if self._current_sample_batch is not None:
+            additional_feed_dict = {t: index for t, index in zip(
+                self._decoder.train_inputs[1:],
+                self._current_sample_batch.decoded.T)}
+        else:
+            additional_feed_dict = {}
+
+        # at the end, we should compute loss
+        if self._time_step == self._decoder.max_output - 1:
+            if self._compute_loss:
+                to_run["xent"] = self._decoder.train_loss
+            else:
+                to_run["xent"] = tf.zeros([])
+
+        return self._all_coders, to_run, additional_feed_dict
+
+    def collect_results(self, results: List[Dict]) -> None:
+        """Process what the TF session returned.
+
+        Only a single time step is always processed at once. First,
+        distributions from all sessions are aggregated.
+
+        """
+
+        summed_logprobs = -np.inf
+        for sess_result in results:
+            summed_logprobs = np.logaddexp(summed_logprobs,
+                                           sess_result["logprobs"])
+        avg_logprobs = summed_logprobs - np.log(len(results))
+
+        expanded_batch = ExpandedSampleBatch(self._current_sample_batch,
+                                           avg_logprobs)
+        self._expanded.append(expanded_batch)
+
+        if not self._to_expand:
+            self._time_step += 1
+            self._to_expand = sample(
+                self._sample_size, self._expanded, self._sample_scoring_f)
+            self._expanded = []
+
+        if self._time_step == self._decoder.max_output:
+            sampled_batch = self._to_expand[-1].decoded.T  # TODO should be of size k
+            decoded_tokens = self._vocabulary.vectors_to_sentences(sampled_batch)
+            loss = np.mean([res["xent"] for res in results])
+            self.result = ExecutionResult(
+                outputs=decoded_tokens,
+                losses=[loss],
+                scalar_summaries=None,
+                histogram_summaries=None,
+                image_summaries=None
+            )
 
 class RuntimeRnnRunner(BaseRunner):
     """Prepare running the RNN decoder step by step."""
@@ -216,7 +469,7 @@ class RuntimeRnnExecutable(Executable):
         self._beam_size = beam_size
         self._beam_scoring_f = beam_scoring_f
 
-        self._to_exapand = [None]  # type: List[Option[BeamBatch]]
+        self._to_expand = [None]  # type: List[Option[BeamBatch]]
         self._current_beam_batch = None
         self._expanded = []  # type: List[ExpandedBeamBatch]
         self._time_step = 0
@@ -236,7 +489,7 @@ class RuntimeRnnExecutable(Executable):
 
         to_run = {'logprobs': self._decoder.train_logprobs[self._time_step]}
 
-        self._current_beam_batch = self._to_exapand.pop()
+        self._current_beam_batch = self._to_expand.pop()
 
         if self._current_beam_batch is not None:
             additional_feed_dict = {t: index for t, index in zip(
@@ -272,14 +525,14 @@ class RuntimeRnnExecutable(Executable):
                                            avg_logprobs)
         self._expanded.append(expanded_batch)
 
-        if not self._to_exapand:
+        if not self._to_expand:
             self._time_step += 1
-            self._to_exapand = n_best(
+            self._to_expand = n_best(
                 self._beam_size, self._expanded, self._beam_scoring_f)
             self._expanded = []
 
         if self._time_step == self._decoder.max_output:
-            top_batch = self._to_exapand[-1].decoded.T
+            top_batch = self._to_expand[-1].decoded.T
             decoded_tokens = self._vocabulary.vectors_to_sentences(top_batch)
             loss = np.mean([res["xent"] for res in results])
             self.result = ExecutionResult(

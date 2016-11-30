@@ -2,7 +2,7 @@
 # tests: lint
 import numpy as np
 
-from neuralmonkey.learning_utils import feed_dicts
+from neuralmonkey.tf_manager import _feed_dicts
 from neuralmonkey.encoders.sentence_encoder import SentenceEncoder
 from neuralmonkey.logging import Logging, debug
 from neuralmonkey.hypothesis import Hypothesis, sort_hypotheses
@@ -49,7 +49,7 @@ class BeamSearchRunner(object):
         sentence_count = 0
 
         for sentence_ds in sentence_datasets:
-            feed_dict = feed_dicts(sentence_ds, coders, train=False)
+            feed_dict = _feed_dicts(sentence_ds, coders, train=False)
             sentence_count += 1
 
             # Run the encoders.

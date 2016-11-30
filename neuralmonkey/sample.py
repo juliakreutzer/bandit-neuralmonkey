@@ -4,7 +4,7 @@ import numpy as np
 from neuralmonkey.logging import log, debug
 from neuralmonkey.encoders.sentence_encoder import SentenceEncoder
 from neuralmonkey.hypothesis import Hypothesis
-from neuralmonkey.learning_utils import feed_dicts
+from neuralmonkey.tf_manager import _feed_dicts
 
 # TODO implement sampling as described in MinRisk paper
 
@@ -32,7 +32,7 @@ class SampleRunner(object):
 
         for sentence_ds in sentence_datasets:
             sentence_count += 1
-            feed_dict = feed_dicts(sentence_ds, coders, train=False)
+            feed_dict = _feed_dicts(sentence_ds, coders, train=False)
             # TODO so far only one sample
             sampled_hyp, sampled_text = self.sampler._sample(sess, sentence_ds, coders, 1, unique=False)[0]
             decoded_sentences.append(sampled_text)
@@ -81,7 +81,7 @@ class Sampler(object):
         """
 
         samples = []  # we don't include gold standard since we don't assume it exists
-        feed_dict = feed_dicts(sentence, coders, train=False)
+        feed_dict = _feed_dicts(sentence, coders, train=False)
 
         i = 0
         while i < sample_size:
