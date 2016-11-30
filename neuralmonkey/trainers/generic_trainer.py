@@ -26,19 +26,15 @@ class GenericTrainer(object):
                  l1_weight=0.0, l2_weight=0.0,
                  clip_norm=False, optimizer=None) -> None:
 
-        if optimizer is None:
-            self.optimizer = tf.train.AdamOptimizer(1e-4)
-        else:
-            self.optimizer = optimizer
+        self.optimizer = optimizer or tf.train.AdamOptimizer(1e-4)
 
         with tf.variable_scope('regularization'):
-            regularizable = [tf.reduce_sum(
-                v ** 2) for v in tf.trainable_variables()
+            regularizable = [v for v in tf.trainable_variables()
                              if BIAS_REGEX.findall(v.name)]
-            l1_value = sum(abs(v) for v in regularizable)
+            l1_value = sum(tf.reduce_sum(abs(v)) for v in regularizable)
             l1_cost = l1_weight * l1_value if l1_weight > 0 else 0.0
 
-            l2_value = sum(v * v for v in regularizable)
+            l2_value = sum(tf.reduce_sum(v ** 2) for v in regularizable)
             l2_cost = l2_weight * l2_value if l2_weight > 0 else 0.0
 
         self.losses = [o.loss for o in objectives] + [l1_value, l2_value]
@@ -57,7 +53,8 @@ class GenericTrainer(object):
 
         gradients = _sum_gradients(partial_gradients)
 
-        if clip_norm is not None:
+        if clip_norm:
+            assert clip_norm > 0.0
             gradients = [(tf.clip_by_norm(grad, clip_norm), var)
                          for grad, var in gradients]
 
