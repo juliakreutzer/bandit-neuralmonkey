@@ -166,8 +166,19 @@ class Decoder(object):
         ## the array is of tuples ([values], [indices])
         return [tf.nn.top_k(p, k_best) for p in self.runtime_logprobs]
 
+    def sample_batch(self, k):
+        """
+        Sample k target words for the full batch and return their log probabilities
+        :param k:
+        :return:
+        """
+        sample_ids = tf.cast(tf.multinomial(self.runtime_logprobs, k), tf.int32)
+        sample_logprobs = tf.gather_nd(self.runtime_logprobs, sample_ids)
+        return sample_logprobs, sample_ids
+
     def sample_singleton(self, k, n):
-        """ Sample k target word indices and their log probabilities from the softmax distribution
+        """ Sample k target words for a single instance.
+        Return word indices and their log probabilities from the softmax distribution
 
         Arguments:
             k: How many outputs to sample
