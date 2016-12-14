@@ -4,15 +4,17 @@ This module servers as a library of API checks used as assertions during
 constructing the computational graph.
 """
 
-# tests: lint
+# tests: lint, mypy
 
 from neuralmonkey.logging import log, debug
+
 
 class CheckingException(Exception):
     pass
 
+
 def check_dataset_and_coders(dataset, runners):
-    #pylint: disable=protected-access
+    # pylint: disable=protected-access
 
     data_list = []
 
@@ -31,7 +33,8 @@ def check_dataset_and_coders(dataset, runners):
 
     for (serie, coder) in data_list:
         if not dataset.has_series(serie):
-            log("dataset {} does not have serie {}".format(dataset.name, serie))
+            log("dataset {} does not have serie {}".format(
+                dataset.name, serie))
             missing.append((coder, serie))
 
     if len(missing) > 0:
@@ -42,6 +45,7 @@ def check_dataset_and_coders(dataset, runners):
 
         raise CheckingException("Dataset '{}' is mising series {}:"
                                 .format(dataset.name, ", ".join(formated)))
+
 
 def missing_attributes(obj, attributes):
     return [attr for attr in attributes is not hasattr(obj, attributes)]

@@ -1,4 +1,4 @@
-# tests: mypy
+# tests: lint, mypy
 
 from typing import Any, Callable, Dict, List, Tuple, Optional, Union
 import os
@@ -14,11 +14,13 @@ from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
 EvalConfiguration = List[Union[Tuple[str, Any], Tuple[str, str, Any]]]
+# pylint: enable=invalid-name
 
 
+# pylint: disable=too-many-arguments, too-many-locals, too-many-branches
 def training_loop(tf_manager: TensorFlowManager,
                   epochs: int,
-                  trainer: BaseRunner, # TODO better annotate
+                  trainer: BaseRunner,  # TODO better annotate
                   batch_size: int,
                   train_dataset: Dataset,
                   val_dataset: Dataset,
@@ -120,7 +122,7 @@ def training_loop(tf_manager: TensorFlowManager,
                         evaluators, batch_dataset, runners,
                         train_results, train_outputs)
 
-                    _log_continuons_evaluation(tb_writer, main_metric,
+                    _log_continuous_evaluation(tb_writer, main_metric,
                                                train_evaluation,
                                                seen_instances,
                                                trainer_result,
@@ -173,20 +175,21 @@ def training_loop(tf_manager: TensorFlowManager,
                             os.symlink(os.path.basename(worst_var_file),
                                        link_best_vars)
 
-                        log("Best scores saved so far: {}".format(saved_scores))
+                        log("Best scores saved so far: {}".format(
+                            saved_scores))
 
                     log("Validation (epoch {}, batch number {}):"
                         .format(i + 1, batch_n), color='blue')
 
-                    _log_continuons_evaluation(tb_writer, main_metric,
+                    _log_continuous_evaluation(tb_writer, main_metric,
                                                val_evaluation, seen_instances,
                                                val_results, train=False)
 
                     if this_score == best_score:
-                        best_score_str = colored("{:.2f}".format(best_score),
+                        best_score_str = colored("{:.4g}".format(best_score),
                                                  attrs=['bold'])
                     else:
-                        best_score_str = "{:.2f}".format(best_score)
+                        best_score_str = "{:.4g}".format(best_score)
 
                     log("best {} on validation: {} (in epoch {}, "
                         "after batch number {})"
@@ -200,8 +203,7 @@ def training_loop(tf_manager: TensorFlowManager,
     except KeyboardInterrupt:
         log("Training interrupted by user.")
 
-
-    log("Training finished. Maximum {} on validation data: {:.2f}, epoch {}"
+    log("Training finished. Maximum {} on validation data: {:.4g}, epoch {}"
         .format(main_metric, best_score, best_score_epoch))
 
     if test_datasets and os.path.islink(link_best_vars):
@@ -315,7 +317,7 @@ def evaluation(evaluators, dataset, runners, execution_results, result_data):
     return eval_result
 
 
-def _log_continuons_evaluation(tb_writer: tf.train.SummaryWriter,
+def _log_continuous_evaluation(tb_writer: tf.train.SummaryWriter,
                                main_metric: str,
                                eval_result: Evaluation,
                                seen_instances: int,
@@ -346,12 +348,12 @@ def _log_continuons_evaluation(tb_writer: tf.train.SummaryWriter,
 def _format_evaluation_line(evaluation_res: Evaluation,
                             main_metric: str) -> str:
     """ Format the evaluation metric for stdout with last one bold."""
-    eval_string = "    ".join("{}: {:.2f}".format(name, value)
+    eval_string = "    ".join("{}: {:.4g}".format(name, value)
                               for name, value in evaluation_res.items()
                               if name != main_metric)
 
     eval_string += colored(
-        "    {}: {:.2f}".format(main_metric,
+        "    {}: {:.4g}".format(main_metric,
                                 evaluation_res[main_metric]),
         attrs=['bold'])
 
@@ -365,7 +367,7 @@ def print_final_evaluation(name: str, eval_result: Evaluation) -> None:
 
     for name, value in eval_result.items():
         space = "".join([" " for _ in range(line_len - len(name))])
-        log("... {}:{} {:.4f}".format(name, space, value))
+        log("... {}:{} {:.4g}".format(name, space, value))
 
     log_print("")
 

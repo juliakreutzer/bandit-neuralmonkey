@@ -5,6 +5,8 @@ from neuralmonkey.vocabulary import PAD_TOKEN
 from neuralmonkey.logging import log
 from neuralmonkey.dataset import Dataset
 
+# tests: lint, mypy
+
 
 class MultiDecoder(object):
     """The MultiDecoder class wraps a several child decoders into
@@ -27,9 +29,10 @@ class MultiDecoder(object):
     During training, the multi decoder works in the following way: According to
     the value of the ``_input_selector`` placeholder, the loss corresponds to
     one of the child decoders (so in multi-task learning, the weights in each
-    batch are updated with respect only to one sub-task). It is therefore a good
-    practice to alternate between batches of different task. This is because we
-    often do not have the training data that cover all tasks in one corpus.
+    batch are updated with respect only to one sub-task). It is therefore a
+    good practice to alternate between batches of different task. This is
+    because we often do not have the training data that cover all tasks in one
+    corpus.
 
     """
 
@@ -98,7 +101,6 @@ class MultiDecoder(object):
     @property
     def data_id(self):
         return self.main_decoder.data_id
-
 
     def feed_dict(self, dataset, train=False):
         """Populate the feed dictionary for the decoder object

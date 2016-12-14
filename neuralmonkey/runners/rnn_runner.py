@@ -204,7 +204,6 @@ def _try_append(first, second):
         return np.append(first, second)
 
 
-
 def likelihood_beam_score(decoded, logprobs):
     """Score the beam by normalized probability."""
 
@@ -543,8 +542,7 @@ class RuntimeRnnExecutable(Executable):
             decoded_tokens = self._vocabulary.vectors_to_sentences(top_batch)
 
             if self._postprocess is not None:
-                decoded_tokens = [self._postprocess(seq)
-                                  for seq in decoded_tokens]
+                decoded_tokens = self._postprocess(decoded_tokens)
 
             loss = np.mean([res["xent"] for res in results])
             self.result = ExecutionResult(

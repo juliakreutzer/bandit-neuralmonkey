@@ -165,8 +165,10 @@ neuralmonkey root directory, run::
 
   scripts/postedit_prepare_data.py \
     --translated-sentences=exp-nm-ape/data/train/train.mt \
-    --target-sentences=exp-nm-ape/data/train.train.pe \
+    --target-sentences=exp-nm-ape/data/train/train.pe \
         > exp-nm-ape/data/train/train.edits
+
+And the same for the development data.
 
 NOTE: You may have to change the path to the exp-nm-ape directory if it is not
 located inside the repository root directory.
@@ -275,7 +277,7 @@ the source sentences::
   rnn_size=300
   max_input_len=50
   embedding_size=300
-  dropout_keep_p=0.8
+  dropout_keep_prob=0.8
   attention_type=decoding_function.Attention
   data_id=source
   name=src_encoder
@@ -298,7 +300,7 @@ The configuration of the second encoder follows::
   rnn_size=300
   max_input_len=50
   embedding_size=300
-  dropout_keep_p=0.8
+  dropout_keep_prob=0.8
   attention_type=decoding_function.Attention
   data_id=translated
   name=trans_encoder
@@ -322,7 +324,7 @@ decoder. Without furhter ado, here it goes::
   rnn_size=300
   max_output_len=50
   reuse_word_embeddings=True
-  dropout_keep_p=0.8
+  dropout_keep_prob=0.8
   use_attention=True
   data_id=edits
   vocabulary=<target_vocabulary>
@@ -350,14 +352,15 @@ We define these two objects like this::
 
   [trainer]
   class=trainers.cross_entropy_trainer.CrossEntropyTrainer
-  decoder=<decoder>
-  l2_regularization=1.0e-8
+  decoders=[<decoder>]
+  l2_weight=1.0e-8
 
   [runner]
   class=runners.runner.GreedyRunner
   decoder=<decoder>
-  batch_size=256
+  output_series=series_named_greedy
 
+Note that runner can only have one decoder, but during training you can train several decoders.
 
 6 - Evaluation metrics
 **********************
@@ -379,6 +382,17 @@ TER::
 TODO check if the TER evaluator works as expected
 
 
+7 - TensorFlow Manager
+******************
+
+In order to handle system variables as how many cores the tensorflow should use, you need to specify the tensorflow manager::
+
+  [tf_manager]
+  class=tf_manager.TensorFlowManager
+  num_threads=4
+  num_sessions=1
+
+
 7 - Main configuration section
 ******************************
 
@@ -389,15 +403,15 @@ parameters::
   [main]
   name=post editing
   output=exp-nm-ape/training
-  encoders=[<trans_encoder>, <src_encoder>]
-  decoder=<decoder>
-  runner=<runner>
+  runners=[<runner>]
+  tf_manager=<tf_manager>
   trainer=<trainer>
   train_dataset=<train_dataset>
   val_dataset=<val_dataset>
-  evaluation=[<bleu>, <ter>]
+  evaluation=[(series_named_greedy,edits,<bleu>), (series_named_greedy,edits,<ter>)]
   minimize=True
   batch_size=128
+  runners_batch_size=256
   epochs=100
   validation_period=1000
   logging_period=20
@@ -409,14 +423,16 @@ models variables) are stored.  It is also worth noting, that if the output
 directory exists, the training is not run, unless the ``overwrite_output_dir``
 flag is set to ``True``.
 
-The ``encoders`` and ``decoder`` parameters specify the model, the ``runner``,
-``trainer``, ``train_dataset`` and ``val_dataset`` options are self-explanatory
-as well.
+The ``runners``, ``tf_manager``, ``trainer``, ``train_dataset`` and ``val_dataset`` options are self-explanatory.
+
+The parameter ``evaluation`` takes list of tuples, where each tuple contain name of output series,
+name of targets and section reference to an evaluation algorithm.
 
 The ``batch_size`` parameter controls how many sentences will be in one training
 mini-batch. When model does not fit into GPU memory, it might be a good idea to
 start reducing this number before anything else. The larger it is, however, the
-sooner the training should converge to the optimum. The ``epochs`` parameter is
+sooner the training should converge to the optimum. The same is for ``runners_batch_size``.
+The ``epochs`` parameter is
 the number of passes through the training data that the training loop should
 do. There is no early stopping mechanism, the training can be resumed after the
 end, however. The training can be safely ctrl+c'ed in any time (preserving the

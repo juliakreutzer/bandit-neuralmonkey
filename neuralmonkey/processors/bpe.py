@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
-# tests: mypy
+# tests: lint, mypy
 
 import codecs
 import re
 from neuralmonkey.logging import log
 from lib.subword_nmt.apply_bpe import BPE, encode
+
+# pylint: disable=too-few-public-methods
+
 
 class BPEPreprocessor(object):
     """ Wrapper class for Byte-Pair-Encoding from Edinburgh """
@@ -23,7 +26,6 @@ class BPEPreprocessor(object):
         with codecs.open(merge_file, "r", "utf-8") as f_data:
             self.bpe = BPE(f_data, separator)
 
-
     def __call__(self, sentence):
         # type: (List[str]) -> List[str]
         """ Adapted code from BPE.segment """
@@ -31,7 +33,7 @@ class BPEPreprocessor(object):
         output = []
         for word in sentence:
 
-            ## Hack. TODO: inspect why there are empty sentences
+            # Hack. TODO: inspect why there are empty sentences
             if len(word) == 0:
                 output.append(word)
                 continue
@@ -44,6 +46,7 @@ class BPEPreprocessor(object):
 
         return output
 
+
 class BPEPostprocessor(object):
 
     def __init__(self, **kwargs):
@@ -55,7 +58,6 @@ class BPEPostprocessor(object):
     def __call__(self, decoded_sentences):
         # type: (List[List[str]]) -> List[List[str]]
         return [self.decode(s) for s in decoded_sentences]
-
 
     def decode(self, sentence):
         # type: (List[str]) -> List[str]

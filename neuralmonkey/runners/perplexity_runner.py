@@ -5,10 +5,16 @@ used in case we train a language model. Instead of decoding sentences in
 computes its perplexities given the decoder.
 """
 
+# tests: lint
+
+# pylint: disable=no-name-in-module
 from neuralmonkey.learning_utils import feed_dicts
 
-#pylint: disable=too-few-public-methods
+# pylint: disable=too-few-public-methods
+
+
 class PerplexityRunner(object):
+
     def __init__(self, decoder, batch_size):
         self.decoder = decoder
         self.batch_size = batch_size

@@ -7,7 +7,6 @@ import sys
 import random
 import os
 from shutil import copyfile
-
 import numpy as np
 import tensorflow as tf
 
@@ -18,7 +17,8 @@ from neuralmonkey.learning_utils import training_loop
 from neuralmonkey.dataset import Dataset
 from neuralmonkey.tf_manager import TensorFlowManager
 
-def create_config(config_file):
+
+def create_config():
     config = Configuration()
 
     # training loop arguments
@@ -35,33 +35,43 @@ def create_config(config_file):
     config.add_argument('save_n_best', int, required=False, default=1)
     config.add_argument('logging_period', int, required=False, default=20)
     config.add_argument('validation_period', int, required=False, default=500)
-    config.add_argument('runners_batch_size', int, required=False, default=None)
+    config.add_argument('runners_batch_size', int,
+                        required=False, default=None)
     config.add_argument('minimize', bool, required=False, default=False)
     config.add_argument('postprocess')
     config.add_argument('name', str)
+    config.add_argument('random_seed', int, required=False)
     config.add_argument('initial_variables', str, required=False, default=[])
     config.add_argument('overwrite_output_dir', bool, required=False,
                         default=False)
 
-    return config.load_file(config_file)
+    return config
+
 
 def main():
     if len(sys.argv) != 2:
         print("Usage: train.py <ini_file>")
         exit(1)
 
-    # random seeds have to be set before anything is created in the graph
-    random.seed(2574600)
-    np.random.seed(2574600)
-    tf.set_random_seed(2574600)
+    # define valid parameters and defaults
+    cfg = create_config()
+    # load the params from the config file, getting also the simple arguments
+    args = cfg.load_file(sys.argv[1])
+    # various things like randseed or summarywriter should be set up here
+    # so that graph building can be recorded
+    # build all the objects specified in the config
 
-    args = create_config(sys.argv[1])
+    if args.random_seed is None:
+        args.random_seed = 2574600
+    random.seed(args.random_seed)
+    np.random.seed(args.random_seed)
+    tf.set_random_seed(args.random_seed)
 
-    print("")
+    args = cfg.build_model()
 
-    #pylint: disable=no-member
-    if os.path.isdir(args.output) and \
-            os.path.exists(os.path.join(args.output, "experiment.ini")):
+    # pylint: disable=no-member
+    if (os.path.isdir(args.output) and
+            os.path.exists(os.path.join(args.output, "experiment.ini"))):
         if args.overwrite_output_dir:
             # we do not want to delete the directory contents
             log("Directory with experiment.ini '{}' exists, "
@@ -82,7 +92,7 @@ def main():
         log(str(exc), color='red')
         exit(1)
 
-    #pylint: disable=broad-except
+    # pylint: disable=broad-except
     if not os.path.isdir(args.output):
         try:
             os.mkdir(args.output)
@@ -123,13 +133,17 @@ def main():
     # it does not matter for git.
     repodir = os.path.dirname(os.path.realpath(__file__))
 
-    os.system("cd {}; git log -1 --format=%H > {}"
+    os.system("cd {}/..; git log -1 --format=%H > {}"
               .format(repodir, git_commit_file))
 
-    os.system("cd {}; git --no-pager diff --color=always > {}"
+    os.system("cd {}/..; git --no-pager diff --color=always > {}"
               .format(repodir, git_diff_file))
 
     link_best_vars = "{}.best".format(variables_file_prefix)
+
+    # runners_batch_size must be set to avoid problems on GPU
+    if args.runners_batch_size == None:
+        args.runners_batch_size = args.batch_size
 
     training_loop(tf_manager=args.tf_manager,
                   epochs=args.epochs,
@@ -147,4 +161,5 @@ def main():
                   logging_period=args.logging_period,
                   validation_period=args.validation_period,
                   postprocess=args.postprocess,
+                  runners_batch_size=args.runners_batch_size,
                   minimize_metric=args.minimize)

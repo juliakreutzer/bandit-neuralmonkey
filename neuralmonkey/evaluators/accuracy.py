@@ -1,9 +1,10 @@
-#tests: lint
+# tests: lint, mypy
 
 import numpy as np
 
+
 class Accuracy(object):
-# pylint: disable=too-few-public-methods
+    # pylint: disable=too-few-public-methods
 
     def __init__(self, name="Accuracy"):
         self.name = name
