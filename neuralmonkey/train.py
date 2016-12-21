@@ -32,7 +32,6 @@ def create_config():
     config.add_argument('evaluation', list)
     config.add_argument('runners', list)
     config.add_argument('test_datasets', list, required=False, default=[])
-    config.add_argument('save_n_best', int, required=False, default=1)
     config.add_argument('logging_period', int, required=False, default=20)
     config.add_argument('validation_period', int, required=False, default=500)
     config.add_argument('runners_batch_size', int,
@@ -141,10 +140,6 @@ def main():
 
     link_best_vars = "{}.best".format(variables_file_prefix)
 
-    # runners_batch_size must be set to avoid problems on GPU
-    if args.runners_batch_size is None:
-        args.runners_batch_size = args.batch_size
-
     training_loop(tf_manager=args.tf_manager,
                   epochs=args.epochs,
                   trainer=args.trainer,
@@ -155,7 +150,6 @@ def main():
                   evaluators=args.evaluation,
                   runners=args.runners,
                   test_datasets=args.test_datasets,
-                  save_n_best_vars=args.save_n_best,
                   link_best_vars=link_best_vars,
                   vars_prefix=variables_file_prefix,
                   logging_period=args.logging_period,
