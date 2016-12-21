@@ -139,6 +139,13 @@ class Decoder(object):
             self.train_logits, self.train_targets, self.train_weights,
             self.vocabulary_size)
 
+        self.sample_size = 1  # TODO
+        self.sample_logprobs, self.sample_ids = \
+            self.sample_batch(self.sample_size)
+        self.sample_probs = tf.exp(self.sample_logprobs)
+
+        self.rewards = None # TODO
+
         # Summaries
         self._init_summaries()
 

@@ -18,7 +18,6 @@ BanditObjective = NamedTuple('BanditObjective',
                         # must have gradients because
                         # loss might not be fully differentiable
                         ('sample_size', int),
-                        ('number_arms', int),
                         ('clip_prob', Optional[float])])
 
 BIAS_REGEX = re.compile(r'[Bb]ias')
@@ -27,9 +26,22 @@ BIAS_REGEX = re.compile(r'[Bb]ias')
 # pylint: disable=too-few-public-methods,too-many-locals
 class GenericBanditTrainer(object):
 
+    # TODO
+    # get sample and its probability
+    # compute gradient of sample w.r.t to weights
+    # get loss from outside graph
+    # compute stochastic gradient
+    # update model
+
     def __init__(self, objectives: List[BanditObjective],
                  l1_weight=0.0, l2_weight=0.0, learning_rate=1e-4,
                  clip_norm=False, optimizer=None) -> None:
+
+        # reward needs to be computed outside the TF
+        self.rewards = tf.placeholder(tf.float32, [None])
+
+        for obj in objectives:
+            obj.decoder.rewards = self.rewards  # TODO does that make sense?
 
         self.optimizer = optimizer(learning_rate=learning_rate) or \
                          tf.train.AdamOptimizer(learning_rate=learning_rate)
@@ -81,7 +93,7 @@ class GenericBanditTrainer(object):
 
     # pylint: disable=unused-argument
     def get_executable(self, train=False, summaries=True) -> Executable:
-        return TrainExecutable(self.all_coders,
+        return TrainBanditExecutable(self.all_coders,
                                self.train_op,
                                self.losses,
                                self.scalar_summaries if summaries else None,
@@ -100,7 +112,16 @@ def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:
     return [(tensor, var) for var, tensor in summed_dict.items()]
 
 
-class TrainExecutable(Executable):
+def _clip_log_probs(log_probs, prob_threshold):
+    """ Clip log probabilities to some threshold """
+    # threshold is prob, input are log probs
+    log_threshold = tf.log(prob_threshold)
+    log_max_value = tf.log(1)
+    return tf.clip_by_value(log_probs, clip_value_min=log_threshold,
+                            clip_value_max=log_max_value)
+
+
+class TrainBanditExecutable(Executable):
 
     def __init__(self, all_coders, train_op, losses, scalar_summaries,
                  histogram_summaries):

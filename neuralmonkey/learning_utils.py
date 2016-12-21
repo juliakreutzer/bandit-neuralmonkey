@@ -220,6 +220,220 @@ def training_loop(tf_manager: TensorFlowManager,
     log("Finished.")
 
 
+# pylint: disable=too-many-arguments, too-many-locals, too-many-branches
+def bandit_training_loop(tf_manager: TensorFlowManager,
+                  epochs: int,
+                  trainer: BaseRunner,  # TODO better annotate
+                  batch_size: int,
+                  train_dataset: Dataset,
+                  val_dataset: Dataset,
+                  log_directory: str,
+                  evaluators: EvalConfiguration,
+                  runners: List[BaseRunner],
+                  test_datasets: Optional[List[Dataset]]=None,
+                  save_n_best_vars: int=1,
+                  link_best_vars="/tmp/variables.data.best",
+                  vars_prefix="/tmp/variables.data",
+                  logging_period: int=20,
+                  validation_period: int=500,
+                  runners_batch_size: Optional[int]=None,
+                  postprocess: Callable=None,
+                  minimize_metric: bool=False):
+
+    # TODO finish the list
+    """
+    Performs the training loop for given graph and data.
+
+    Args:
+        tf_manager: TensorFlowManager with initialized sessions.
+        epochs: Number of epochs for which the algoritm will learn.
+        trainer: The trainer object containg the TensorFlow code for computing
+            the loss and optimization operation.
+        train_dataset:
+        val_dataset:
+        postprocess: Function that takes the output sentence as produced by the
+            decoder and transforms into tokenized sentence.
+        log_directory: Directory where the TensordBoard log will be generated.
+            If None, nothing will be done.
+        evaluators: List of evaluators. The last evaluator is used as the main.
+            An evaluator is a tuple of the name of the generated series, the
+            name of the dataset series the generated one is evaluated with and
+            the evaluation function. If only one series names is provided, it
+            means the generated and dataset series have the same name.
+    """
+
+    evaluators = [(e[0], e[0], e[1]) if len(e) == 2 else e
+                  for e in evaluators]
+
+    main_metric = "{}/{}".format(evaluators[-1][0], evaluators[-1][-1].name)
+    step = 0
+    seen_instances = 0
+
+    if save_n_best_vars < 1:
+        raise Exception('save_n_best_vars must be greater than zero')
+
+    if save_n_best_vars == 1:
+        variables_files = [vars_prefix]
+    elif save_n_best_vars > 1:
+        variables_files = ['{}.{}'.format(vars_prefix, i)
+                           for i in range(save_n_best_vars)]
+
+    if minimize_metric:
+        saved_scores = [np.inf for _ in range(save_n_best_vars)]
+        best_score = np.inf
+    else:
+        saved_scores = [-np.inf for _ in range(save_n_best_vars)]
+        best_score = -np.inf
+
+    tf_manager.save(variables_files[0])
+
+    if os.path.islink(link_best_vars):
+        # if overwriting output dir
+        os.unlink(link_best_vars)
+    os.symlink(os.path.basename(variables_files[0]), link_best_vars)
+
+    if log_directory:
+        log("Initializing TensorBoard summary writer.")
+        tb_writer = tf.train.SummaryWriter(log_directory,
+                                           tf_manager.sessions[0].graph)
+        log("TesorBoard writer initialized.")
+
+    best_score_epoch = 0
+    best_score_batch_no = 0
+
+    log("Starting training")
+    try:
+        for i in range(epochs):
+            log_print("")
+            log("Epoch {} starts".format(i + 1), color='red')
+
+            train_dataset.shuffle()
+            train_batched_datasets = train_dataset.batch_dataset(batch_size)
+
+            for batch_n, batch_dataset in enumerate(train_batched_datasets):
+
+                step += 1
+                seen_instances += len(batch_dataset)
+                if step % logging_period == logging_period - 1:
+                    # sample, compute sample probs, derive sample probs wrt params
+                    sampling_result = tf_manager.execute(  # TODO build in bandit sampler here
+                        batch_dataset, [trainer], train=True,  # train=False?
+                        summaries=True)
+                    sampled_outputs, sample_logprobs = sampling_result
+                    # evaluate samples
+                    sample_evaluation = evaluation(evaluators, batch_dataset,
+                                                   runners, None,
+                                                   sampled_outputs)  # losses cannot yet be computed
+                    # TODO implement sentence-wise evaluator, e.g. sBLEU
+                    # update model with samples and their rewards
+                    _ = tf_manager.execute(  # trainer somehow needs 2 different executables
+                        batch_dataset, [trainer], train=True, summaries=True
+                        )
+
+                    train_results, train_outputs = run_on_dataset(
+                        tf_manager, runners, batch_dataset,
+                        postprocess, write_out=False)
+                    train_evaluation = evaluation(
+                        evaluators, batch_dataset, runners,
+                        train_results, train_outputs)
+
+                    _log_continuous_evaluation(tb_writer, main_metric,
+                                               train_evaluation,
+                                               seen_instances,
+                                               train_results,
+                                               train=True)
+                else:
+                    tf_manager.execute(batch_dataset, [trainer],
+                                       train=True, summaries=False)  # TODO same as above
+
+                if step % validation_period == validation_period - 1:
+                    val_results, val_outputs = run_on_dataset(
+                        tf_manager, runners, val_dataset,
+                        postprocess, write_out=False,
+                        batch_size=runners_batch_size)
+                    val_evaluation = evaluation(
+                        evaluators, val_dataset, runners, val_results,
+                        val_outputs)
+
+                    this_score = val_evaluation[main_metric]
+
+                    def is_better(score1, score2, minimize):
+                        if minimize:
+                            return score1 < score2
+                        else:
+                            return score1 > score2
+
+                    def argworst(scores, minimize):
+                        if minimize:
+                            return np.argmax(scores)
+                        else:
+                            return np.argmin(scores)
+
+                    if is_better(this_score, best_score, minimize_metric):
+                        best_score = this_score
+                        best_score_epoch = i + 1
+                        best_score_batch_no = batch_n
+
+                    worst_index = argworst(saved_scores, minimize_metric)
+                    worst_score = saved_scores[worst_index]
+
+                    if is_better(this_score, worst_score, minimize_metric):
+                        # we need to save this score instead the worst score
+                        worst_var_file = variables_files[worst_index]
+                        tf_manager.save(worst_var_file)
+                        saved_scores[worst_index] = this_score
+                        log("Variable file saved in {}".format(worst_var_file))
+
+                        # update symlink
+                        if best_score == this_score:
+                            os.unlink(link_best_vars)
+                            os.symlink(os.path.basename(worst_var_file),
+                                       link_best_vars)
+
+                        log("Best scores saved so far: {}".format(
+                            saved_scores))
+
+                    log("Validation (epoch {}, batch number {}):"
+                        .format(i + 1, batch_n), color='blue')
+
+                    _log_continuous_evaluation(tb_writer, main_metric,
+                                               val_evaluation, seen_instances,
+                                               val_results, train=False)
+
+                    if this_score == best_score:
+                        best_score_str = colored("{:.4g}".format(best_score),
+                                                 attrs=['bold'])
+                    else:
+                        best_score_str = "{:.4g}".format(best_score)
+
+                    log("best {} on validation: {} (in epoch {}, "
+                        "after batch number {})"
+                        .format(main_metric, best_score_str,
+                                best_score_epoch, best_score_batch_no),
+                        color='blue')
+
+                    log_print("")
+                    _print_examples(val_dataset, val_outputs)
+
+    except KeyboardInterrupt:
+        log("Training interrupted by user.")
+
+    log("Training finished. Maximum {} on validation data: {:.4g}, epoch {}"
+        .format(main_metric, best_score, best_score_epoch))
+
+    if test_datasets and os.path.islink(link_best_vars):
+        tf_manager.restore(link_best_vars)
+
+    for dataset in test_datasets:
+        test_results, test_outputs = run_on_dataset(
+            tf_manager, runners, dataset, postprocess,
+            write_out=True, batch_size=runners_batch_size)
+        eval_result = evaluation(evaluators, dataset, runners,
+                                 test_results, test_outputs)
+        print_final_evaluation(dataset.name, eval_result)
+
+    log("Finished.")
+
 def run_on_dataset(tf_manager: TensorFlowManager,
                    runners: List[BaseRunner],
                    dataset: Dataset,

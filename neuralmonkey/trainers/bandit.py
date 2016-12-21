@@ -1,33 +1,41 @@
 from typing import Any, List
 
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer, \
-    BanditObjective
+    BanditObjective, _clip_log_probs
+
+import tensorflow as tf
 
 # tests; pylint,mypy
+
 
 def expected_loss_objective(decoder, k) -> BanditObjective:
     """Get expected loss objective from decoder."""
     return BanditObjective(
         name="{} - expected_loss".format(decoder.name),
         decoder=decoder,
-        loss=decoder.sample_batch(k)*decoder.rewards,  # TODO
-        gradients=None, # TODO do not auto-compute?
-        sample_size=k,
-        number_arms=1,
-        clip_prob=None
+        # TODO: delta(y) * dlog p/dw
+        grad_nondiff=1-decoder.rewards,  # non-differentiable part
+        grad_diff=decoder.sample_logprobs,  # differentiable part
+        loss=(1-decoder.rewards)*decoder.sample_probs,  # expected loss
+        sample_size=k
     )
+
 
 def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
+    # TODO use k
     return BanditObjective(
         name="{} - cross-entropy".format(decoder.name),
         decoder=decoder,
-        loss=None,  # TODO
-        gradients=None, # TODO
+        grad_nondiff=decoder.rewards/_clip_log_probs(decoder.sample_probs,
+                                                     clip_prob),
+        grad_diff=decoder.sample_logprobs, # TODO also clip here?
+        # TODO: g(y)/p * dlogp/dw
+        loss=decoder.rewards/decoder.sample_probs*decoder.sample_logprobs,
         sample_size=k,
-        number_arms=1,
         clip_prob=clip_prob
     )
+
 
 def pairwise_objective(decoder, k) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
@@ -36,11 +44,8 @@ def pairwise_objective(decoder, k) -> BanditObjective:
         decoder=decoder,
         loss=None,  # TODO
         gradients=None, # TODO
-        sample_size=k,
-        number_arms=2,
-        clip_prob=None
+        sample_size=2*k
     )
-
 
 class ExpectedLossTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
