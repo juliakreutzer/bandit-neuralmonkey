@@ -10,6 +10,7 @@ from neuralmonkey.logging import log, log_print
 from neuralmonkey.dataset import Dataset
 from neuralmonkey.tf_manager import TensorFlowManager
 from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
+from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
 
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
@@ -223,7 +224,7 @@ def training_loop(tf_manager: TensorFlowManager,
 # pylint: disable=too-many-arguments, too-many-locals, too-many-branches
 def bandit_training_loop(tf_manager: TensorFlowManager,
                   epochs: int,
-                  trainer: BaseRunner,  # TODO better annotate
+                  trainer: GenericBanditTrainer,
                   batch_size: int,
                   train_dataset: Dataset,
                   val_dataset: Dataset,
@@ -317,17 +318,28 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 if step % logging_period == logging_period - 1:
                     # sample, compute sample probs, derive sample probs wrt params
                     sampling_result = tf_manager.execute(  # TODO build in bandit sampler here
-                        batch_dataset, [trainer], train=True,  # train=False?
+                        batch_dataset, [trainer], update=False,  # train=False?
                         summaries=True)
-                    sampled_outputs, sample_logprobs = sampling_result
+                    sampled_outputs, sampled_logprobs, grad_diff, reg_cost = \
+                        sampling_result
                     # evaluate samples
                     sample_evaluation = evaluation(evaluators, batch_dataset,
                                                    runners, None,
                                                    sampled_outputs)  # losses cannot yet be computed
-                    # TODO implement sentence-wise evaluator, e.g. sBLEU
+                    # TODO implement sentence-wise evaluator, e.g. sBLEU, check mixer
+
+                    # TODO report sample probability
+
+                    # TODO scale grad_diff by reward
+
+                    # TODO add regularization cost
+
                     # update model with samples and their rewards
+                    stochastic_gradients = None
+                    trainer._set_gradients(stochastic_gradients)
+
                     _ = tf_manager.execute(  # trainer somehow needs 2 different executables
-                        batch_dataset, [trainer], train=True, summaries=True
+                        batch_dataset, [trainer], update=True, summaries=True
                         )
 
                     train_results, train_outputs = run_on_dataset(

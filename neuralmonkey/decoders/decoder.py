@@ -139,17 +139,23 @@ class Decoder(object):
             self.train_logits, self.train_targets, self.train_weights,
             self.vocabulary_size)
 
-        self.sample_size = 1  # TODO
-        self.sample_logprobs, self.sample_ids = \
-            self.sample_batch(self.sample_size)
-        self.sample_probs = tf.exp(self.sample_logprobs)
+        self.sample_size = 1  # TODO make param
+        # self.runtime_logprobs: list of tensors [batch_size, self.vocabulary_size] of length max_output_len
+        # FIXME add multiple samples
+        self.sample_logprobs, self.sample_ids = self.sample_batch()
+        log("Sample logprobs:")
+        log(self.sample_logprobs)  # batch_size x sample_size
+        self.sample_probs = [tf.exp(lp) for lp in self.sample_logprobs]
 
-        self.rewards = None # TODO
+        log("Sample ids:")
+        log(self.sample_ids)  # batch_size
 
         # Summaries
         self._init_summaries()
 
         log("Decoder initialized.")
+        log("runtime_logprobs:")
+        log(self.runtime_logprobs)
 
     @property
     def vocabulary_size(self):
@@ -169,15 +175,22 @@ class Decoder(object):
         # the array is of tuples ([values], [indices])
         return [tf.nn.top_k(p, k_best) for p in self.runtime_logprobs]
 
-    def sample_batch(self, k):
+    def sample_batch(self):
         """
-        Sample k target words for the full batch and return their log
-        probabilities
+        Sample a target words for the full batch and return its
+        log probabilities
         :param k:
         :return:
         """
-        sample_ids = tf.cast(tf.multinomial(self.runtime_logprobs, k), tf.int32)
-        sample_logprobs = tf.gather_nd(self.runtime_logprobs, sample_ids)
+        sample_ids = []
+        sample_logprobs = []
+        for p in self.runtime_logprobs:  # time steps
+            sample_id = tf.squeeze(tf.cast(tf.multinomial(p, 1), tf.int32))
+            batch_enum = tf.range(tf.shape(sample_id)[0])
+            indices = tf.pack([batch_enum, sample_id], 1)
+            sample_logprob = tf.gather_nd(p, indices)
+            sample_ids.append(sample_id)
+            sample_logprobs.append(sample_logprob)
         return sample_logprobs, sample_ids
 
     def sample_singleton(self, k, n):

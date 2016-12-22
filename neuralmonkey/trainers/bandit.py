@@ -16,6 +16,7 @@ def expected_loss_objective(decoder, k) -> BanditObjective:
         # TODO: delta(y) * dlog p/dw
         grad_nondiff=1-decoder.rewards,  # non-differentiable part
         grad_diff=decoder.sample_logprobs,  # differentiable part
+        samples=decoder.sample_ids,
         loss=(1-decoder.rewards)*decoder.sample_probs,  # expected loss
         sample_size=k
     )
@@ -30,6 +31,7 @@ def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
         grad_nondiff=decoder.rewards/_clip_log_probs(decoder.sample_probs,
                                                      clip_prob),
         grad_diff=decoder.sample_logprobs, # TODO also clip here?
+        samples=decoder.sample_ids,
         # TODO: g(y)/p * dlogp/dw
         loss=decoder.rewards/decoder.sample_probs*decoder.sample_logprobs,
         sample_size=k,
@@ -37,6 +39,7 @@ def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
     )
 
 
+# TODO
 def pairwise_objective(decoder, k) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     return BanditObjective(

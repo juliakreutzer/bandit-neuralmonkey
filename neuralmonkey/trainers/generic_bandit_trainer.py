@@ -2,9 +2,11 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import re
 
 import tensorflow as tf
+from tensorflow.python.ops import variables
+
 
 from neuralmonkey.runners.base_runner import (collect_encoders, Executable,
-                                              ExecutionResult, NextExecute)
+                                              BanditExecutionResult, NextExecute)
 
 # tests: lint, mypy
 
@@ -33,15 +35,12 @@ class GenericBanditTrainer(object):
     # compute stochastic gradient
     # update model
 
-    def __init__(self, objectives: List[BanditObjective],
+    # FIXME
+    # only one objective for now
+
+    def __init__(self, objective: BanditObjective, gradients=None,
                  l1_weight=0.0, l2_weight=0.0, learning_rate=1e-4,
                  clip_norm=False, optimizer=None) -> None:
-
-        # reward needs to be computed outside the TF
-        self.rewards = tf.placeholder(tf.float32, [None])
-
-        for obj in objectives:
-            obj.decoder.rewards = self.rewards  # TODO does that make sense?
 
         self.optimizer = optimizer(learning_rate=learning_rate) or \
                          tf.train.AdamOptimizer(learning_rate=learning_rate)
@@ -55,28 +54,30 @@ class GenericBanditTrainer(object):
             l2_value = sum(tf.reduce_sum(v ** 2) for v in regularizable)
             l2_cost = l2_weight * l2_value if l2_weight > 0 else 0.0
 
-        self.losses = [o.loss for o in objectives] + [l1_value, l2_value]
         tf.scalar_summary('train_l1', l1_value, collections=["summary_train"])
         tf.scalar_summary('train_l2', l2_value, collections=["summary_train"])
 
-        partial_gradients = []  # type: List[Gradients]
-        for objective in objectives:
-            partial_gradients.append(objective.gradients)
-        partial_gradients += [self._get_gradients(l)
-                              for l in [l1_cost, l2_cost] if l != 0.]
+        # part of the gradients which is differentiable
+        # TODO which parameters?
+        self.partial_gradients = tf.gradients(objective.grad_diff,
+                                              variables.trainable_variables())
 
-        gradients = _sum_gradients(partial_gradients)
+        self.regularizer_cost = _sum_gradients([self._get_gradients(l)
+                              for l in [l1_cost, l2_cost] if l != 0.])
+
+        self.all_coders = set.union(*(collect_encoders(objective.decoder)))
+
+        self.gradients = gradients
 
         if clip_norm:
             assert clip_norm > 0.0
-            gradients = [(tf.clip_by_norm(grad, clip_norm), var)
-                         for grad, var in gradients]
+            self.gradients = [(tf.clip_by_norm(grad, clip_norm), var)
+                         for grad, var in self.gradients]
 
-        self.all_coders = set.union(*(collect_encoders(obj.decoder)
-                                      for obj in objectives))
-        self.train_op = self.optimizer.apply_gradients(gradients)
+        self.sample_op = (objective.samples, self.partial_gradients)  # TODO
+        self.update_op = self.optimizer.apply_gradients(self.gradients)  # TODO
 
-        for grad, var in gradients:
+        for grad, var in self.gradients:
             if grad is not None:
                 tf.histogram_summary('gr_' + var.name,
                                      grad, collections=["summary_gradients"])
@@ -91,13 +92,23 @@ class GenericBanditTrainer(object):
         gradient_list = self.optimizer.compute_gradients(tensor)
         return gradient_list
 
+    # TODO is input really a tensor? or a dictionary?
+    def _set_gradients(self, tensor: tf.Tensor) -> Gradients:
+        self.gradients = tensor
+
     # pylint: disable=unused-argument
-    def get_executable(self, train=False, summaries=True) -> Executable:
-        return TrainBanditExecutable(self.all_coders,
-                               self.train_op,
-                               self.losses,
-                               self.scalar_summaries if summaries else None,
-                               self.histogram_summaries if summaries else None)
+    def get_executable(self, train=False, update=False, summaries=True) -> Executable:
+        if update == True:
+            return UpdateBanditExecutable(self.all_coders,
+                                   self.update_op,
+                                   self.scalar_summaries if summaries else None,
+                                   self.histogram_summaries if summaries else None)
+        else:
+            return SampleBanditExecutable(self.all_coders,
+                                         self.sample_op,
+                                         self.regularizer_cost,
+                                         self.scalar_summaries if summaries else None,
+                                         self.histogram_summaries if summaries else None)
 
 
 def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:
@@ -121,24 +132,22 @@ def _clip_log_probs(log_probs, prob_threshold):
                             clip_value_max=log_max_value)
 
 
-class TrainBanditExecutable(Executable):
+class UpdateBanditExecutable(Executable):
 
-    def __init__(self, all_coders, train_op, losses, scalar_summaries,
+    def __init__(self, all_coders, update_op, scalar_summaries,
                  histogram_summaries):
         self.all_coders = all_coders
-        self.train_op = train_op
-        self.losses = losses
+        self.update_op = update_op
         self.scalar_summaries = scalar_summaries
         self.histogram_summaries = histogram_summaries
 
         self.result = None
 
     def next_to_execute(self) -> NextExecute:
-        fetches = {'train_op': self.train_op}
+        fetches = {'update_op': self.update_op}
         if self.scalar_summaries is not None:
             fetches['scalar_summaries'] = self.scalar_summaries
             fetches['histogram_summaries'] = self.histogram_summaries
-        fetches['losses'] = self.losses
 
         return self.all_coders, fetches, {}
 
@@ -151,15 +160,44 @@ class TrainBanditExecutable(Executable):
             scalar_summaries = results[0]['scalar_summaries']
             histogram_summaries = results[0]['histogram_summaries']
 
-        losses_sum = [0. for _ in self.losses]
-        for session_result in results:
-            for i in range(len(self.losses)):
-                # from the end, losses are last ones
-                losses_sum[i] += session_result['losses'][i]
-        avg_losses = [s / len(results) for s in losses_sum]
+        self.result = BanditExecutionResult(
+            [], scalar_summaries=scalar_summaries,
+            histogram_summaries=histogram_summaries,
+            image_summaries=None)
 
-        self.result = ExecutionResult(
-            [], losses=avg_losses,
+
+class SampleBanditExecutable(Executable):
+
+    def __init__(self, all_coders, sample_op, regularization_cost, scalar_summaries,
+                 histogram_summaries):
+        self.all_coders = all_coders
+        self.sample_op = sample_op
+        self.scalar_summaries = scalar_summaries
+        self.histogram_summaries = histogram_summaries
+        self.regularization_cost = regularization_cost
+
+        self.result = None
+
+    def next_to_execute(self) -> NextExecute:
+        fetches = {'sample_op': self.sample_op}
+        if self.scalar_summaries is not None:
+            fetches['scalar_summaries'] = self.scalar_summaries
+            fetches['histogram_summaries'] = self.histogram_summaries
+        fetches['reg_cost'] = self.regularization_cost
+
+        return self.all_coders, fetches, {}
+
+    def collect_results(self, results: List[Dict]) -> None:
+        if self.scalar_summaries is None:
+            scalar_summaries = None
+            histogram_summaries = None
+        else:
+            # TODO collect summaries from different sessions
+            scalar_summaries = results[0]['scalar_summaries']
+            histogram_summaries = results[0]['histogram_summaries']
+
+        self.result = BanditExecutionResult(
+            [],
             scalar_summaries=scalar_summaries,
             histogram_summaries=histogram_summaries,
             image_summaries=None)

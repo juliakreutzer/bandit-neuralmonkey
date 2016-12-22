@@ -13,6 +13,11 @@ ExecutionResult = NamedTuple('ExecutionResult',
                               ('scalar_summaries', tf.Summary),
                               ('histogram_summaries', tf.Summary),
                               ('image_summaries', tf.Summary)])
+BanditExecutionResult = NamedTuple('BanditExecutionResult',
+                             [('outputs', List[Any]),
+                              ('scalar_summaries', tf.Summary),
+                              ('histogram_summaries', tf.Summary),
+                              ('image_summaries', tf.Summary)])
 
 
 class Executable(object):
