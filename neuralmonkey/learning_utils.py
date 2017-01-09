@@ -11,6 +11,7 @@ from neuralmonkey.dataset import Dataset
 from neuralmonkey.tf_manager import TensorFlowManager
 from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
+from neuralmonkey.evaluators.bleu import BLEUEvaluator
 
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
@@ -297,7 +298,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
         log("Initializing TensorBoard summary writer.")
         tb_writer = tf.train.SummaryWriter(log_directory,
                                            tf_manager.sessions[0].graph)
-        log("TesorBoard writer initialized.")
+        log("TensorBoard writer initialized.")
 
     best_score_epoch = 0
     best_score_batch_no = 0
@@ -315,32 +316,40 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 step += 1
                 seen_instances += len(batch_dataset)
+                log("dataset_batch:")
+                log(batch_n)
+
+                # sample, compute sample probs, derive sample probs wrt params
+                sampling_result = tf_manager.execute(
+                    # TODO build in bandit sampler here
+                    batch_dataset, [trainer], update=False,  # train=False?
+                    summaries=True)
+                sampled_outputs, sampled_logprobs, reg_cost = \
+                    sampling_result['output']
+
+                log("sampled translations and gold translations")
+                log(zip(sampled_outputs, batch_dataset))
+                # evaluate samples
+                # sample_evaluation = evaluation(evaluators, batch_dataset,
+                #                               runners, None,
+                #                               sampled_outputs)  # losses cannot yet be computed
+                # TODO implement sentence-wise evaluator, e.g. sBLEU, check mixer
+                # TODO use evaluator specified in params
+                # rewards for full batch
+                rewards = BLEUEvaluator.bleu(sampled_outputs, batch_dataset)
+
+                # report sample probability
+                log("sample logprobs:")
+                log(sampled_logprobs)
+
+                # update model with samples and their rewards
+
+                _ = tf_manager.execute(
+                    # trainer somehow needs 2 different executables
+                    batch_dataset, [trainer], update=True, summaries=True
+                )
+
                 if step % logging_period == logging_period - 1:
-                    # sample, compute sample probs, derive sample probs wrt params
-                    sampling_result = tf_manager.execute(  # TODO build in bandit sampler here
-                        batch_dataset, [trainer], update=False,  # train=False?
-                        summaries=True)
-                    sampled_outputs, sampled_logprobs, grad_diff, reg_cost = \
-                        sampling_result
-                    # evaluate samples
-                    sample_evaluation = evaluation(evaluators, batch_dataset,
-                                                   runners, None,
-                                                   sampled_outputs)  # losses cannot yet be computed
-                    # TODO implement sentence-wise evaluator, e.g. sBLEU, check mixer
-
-                    # TODO report sample probability
-
-                    # TODO scale grad_diff by reward
-
-                    # TODO add regularization cost
-
-                    # update model with samples and their rewards
-                    stochastic_gradients = None
-                    trainer._set_gradients(stochastic_gradients)
-
-                    _ = tf_manager.execute(  # trainer somehow needs 2 different executables
-                        batch_dataset, [trainer], update=True, summaries=True
-                        )
 
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
@@ -354,9 +363,9 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                                seen_instances,
                                                train_results,
                                                train=True)
-                else:
-                    tf_manager.execute(batch_dataset, [trainer],
-                                       train=True, summaries=False)  # TODO same as above
+               # else:
+                #    tf_manager.execute(batch_dataset, [trainer],
+                 #                      train=True, summaries=False)  # TODO same as above
 
                 if step % validation_period == validation_period - 1:
                     val_results, val_outputs = run_on_dataset(

@@ -13,9 +13,10 @@ import tensorflow as tf
 from neuralmonkey.checking import CheckingException, check_dataset_and_coders
 from neuralmonkey.logging import Logging, log
 from neuralmonkey.config.configuration import Configuration
-from neuralmonkey.learning_utils import training_loop
+from neuralmonkey.learning_utils import training_loop, bandit_training_loop
 from neuralmonkey.dataset import Dataset
 from neuralmonkey.tf_manager import TensorFlowManager
+from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
 
 
 def create_config():
@@ -145,7 +146,29 @@ def main():
     if args.runners_batch_size is None:
         args.runners_batch_size = args.batch_size
 
-    training_loop(tf_manager=args.tf_manager,
+    if isinstance(args.trainer, GenericBanditTrainer):
+        log("Bandit Training.")
+        bandit_training_loop(tf_manager=args.tf_manager,
+                      epochs=args.epochs,
+                      trainer=args.trainer,
+                      batch_size=args.batch_size,
+                      train_dataset=args.train_dataset,
+                      val_dataset=args.val_dataset,
+                      log_directory=args.output,
+                      evaluators=args.evaluation,
+                      runners=args.runners,
+                      test_datasets=args.test_datasets,
+                      save_n_best_vars=args.save_n_best,
+                      link_best_vars=link_best_vars,
+                      vars_prefix=variables_file_prefix,
+                      logging_period=args.logging_period,
+                      validation_period=args.validation_period,
+                      postprocess=args.postprocess,
+                      runners_batch_size=args.runners_batch_size,
+                      minimize_metric=args.minimize)
+    else:
+        log("Full Information Training.")
+        training_loop(tf_manager=args.tf_manager,
                   epochs=args.epochs,
                   trainer=args.trainer,
                   batch_size=args.batch_size,

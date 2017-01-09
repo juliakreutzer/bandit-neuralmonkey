@@ -2,6 +2,9 @@ from typing import Any, Dict, Tuple, List, NamedTuple, Union
 import numpy as np
 import tensorflow as tf
 
+from neuralmonkey.logging import log
+
+
 # tests: pylint, mypy
 
 # pylint: disable=invalid-name
@@ -56,13 +59,19 @@ def reduce_execution_results(
         execution_results: List[ExecutionResult]) -> ExecutionResult:
     """Aggregate execution results into one."""
     outputs = []  # type: List[Any]
-    losses_sum = [0. for _ in execution_results[0].losses]
+    bandit_result = any([type(e) is BanditExecutionResult for e in execution_results])
+    if not bandit_result:
+        losses_sum = [0. for _ in execution_results[0].losses]
     for result in execution_results:
         outputs.extend(result.outputs)
-        for i, loss in enumerate(result.losses):
-            losses_sum[i] += loss
+        if not bandit_result:
+            for i, loss in enumerate(result.losses):
+                losses_sum[i] += loss
         # TODO aggregate TensorBoard summaries
-    losses = [l / max(len(outputs), 1) for l in losses_sum]
+    if not bandit_result:
+        losses = [l / max(len(outputs), 1) for l in losses_sum]
+    else:
+        losses = None
     return ExecutionResult(outputs, losses,
                            execution_results[0].scalar_summaries,
                            execution_results[0].histogram_summaries,

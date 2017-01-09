@@ -2,6 +2,8 @@ from typing import Any, List
 
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer, \
     BanditObjective, _clip_log_probs
+from neuralmonkey.logging import log
+
 
 import tensorflow as tf
 
@@ -17,8 +19,9 @@ def expected_loss_objective(decoder, k) -> BanditObjective:
         grad_nondiff=1-decoder.rewards,  # non-differentiable part
         grad_diff=decoder.sample_logprobs,  # differentiable part
         samples=decoder.sample_ids,
-        loss=(1-decoder.rewards)*decoder.sample_probs,  # expected loss
-        sample_size=k
+     #   loss=(1-decoder.rewards)*decoder.sample_probs,  # expected loss  # TODO remove because not needed
+        sample_size=k,
+        clip_prob=-1
     )
 
 
@@ -33,7 +36,7 @@ def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
         grad_diff=decoder.sample_logprobs, # TODO also clip here?
         samples=decoder.sample_ids,
         # TODO: g(y)/p * dlogp/dw
-        loss=decoder.rewards/decoder.sample_probs*decoder.sample_logprobs,
+    #    loss=decoder.rewards/decoder.sample_probs*decoder.sample_logprobs,
         sample_size=k,
         clip_prob=clip_prob
     )
@@ -45,7 +48,7 @@ def pairwise_objective(decoder, k) -> BanditObjective:
     return BanditObjective(
         name="{} - pairwise".format(decoder.name),
         decoder=decoder,
-        loss=None,  # TODO
+     #   loss=None,  # TODO
         gradients=None, # TODO
         sample_size=2*k
     )
@@ -54,9 +57,9 @@ class ExpectedLossTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
                  learning_rate=1e-4,
                  clip_norm=False, optimizer=None, k=1) -> None:
-        objectives = [expected_loss_objective(dec, k) for dec in decoders]
-        super(ExpectedLossTrainer, self).__init__(
-            objectives, l1_weight, l2_weight, learning_rate=learning_rate,
+        objective = expected_loss_objective(decoders[0], k)
+        super(ExpectedLossTrainer, self).__init__(  # FIXME only 1 decoder/objective so far
+            objective, l1_weight, l2_weight, learning_rate=learning_rate,
             clip_norm=clip_norm,
             optimizer=optimizer)
 

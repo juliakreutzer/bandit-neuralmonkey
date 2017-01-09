@@ -2,7 +2,8 @@
 
 set -ex
 
-bin/neuralmonkey-train tests/small.ini
+#bin/neuralmonkey-train tests/small.ini
+bin/neuralmonkey-train tests/small-bandit.ini
 bin/neuralmonkey-run tests/small.ini tests/test_data.ini
 
 rm -rf tests/tmp-test-output

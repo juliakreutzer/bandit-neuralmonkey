@@ -144,11 +144,11 @@ class Decoder(object):
         # FIXME add multiple samples
         self.sample_logprobs, self.sample_ids = self.sample_batch()
         log("Sample logprobs:")
-        log(self.sample_logprobs)  # batch_size x sample_size
+        log(self.sample_logprobs)  # timestep-length list of batch_size x sample_size tensors
         self.sample_probs = [tf.exp(lp) for lp in self.sample_logprobs]
 
         log("Sample ids:")
-        log(self.sample_ids)  # batch_size
+        log(self.sample_ids)  # timestep-length list of batch_size x 1
 
         # Summaries
         self._init_summaries()
@@ -156,6 +156,8 @@ class Decoder(object):
         log("Decoder initialized.")
         log("runtime_logprobs:")
         log(self.runtime_logprobs)
+
+        self.rewards = tf.placeholder(tf.float32, [None,1])
 
     @property
     def vocabulary_size(self):
@@ -177,7 +179,7 @@ class Decoder(object):
 
     def sample_batch(self):
         """
-        Sample a target words for the full batch and return its
+        Sample a target words for the full batch and return its ids and
         log probabilities
         :param k:
         :return:
@@ -185,12 +187,27 @@ class Decoder(object):
         sample_ids = []
         sample_logprobs = []
         for p in self.runtime_logprobs:  # time steps
-            sample_id = tf.squeeze(tf.cast(tf.multinomial(p, 1), tf.int32))
-            batch_enum = tf.range(tf.shape(sample_id)[0])
-            indices = tf.pack([batch_enum, sample_id], 1)
-            sample_logprob = tf.gather_nd(p, indices)
+            # with gather_nd
+            # FIXME no gradients implemented yet
+            #sample_id = tf.squeeze(tf.cast(tf.multinomial(p, 1), tf.int32))
+            #batch_enum = tf.range(tf.shape(sample_id)[0])
+            #indices = tf.pack([batch_enum, sample_id], 1)
+            #sample_logprob = tf.gather_nd(p, indices)
+            #sample_ids.append(sample_id)
+            #sample_logprobs.append(sample_logprob)
+
+            # with gather and flattening
+            sample_id = tf.cast(tf.multinomial(p, 1), tf.int32) # batch_size x 1
+            flat_p = tf.reshape(p, [-1])  # batch_size*vocab_size
+            batch_size = tf.shape(sample_id)[0]
+            # add correction to indices because of flattening
+            to_add = tf.reshape(tf.range(0, batch_size * self.vocabulary_size,
+                              self.vocabulary_size), [batch_size, -1])
+            indices = sample_id + to_add
+            sample_logprob = tf.gather(flat_p, indices)  # batch_size x 1
             sample_ids.append(sample_id)
             sample_logprobs.append(sample_logprob)
+
         return sample_logprobs, sample_ids
 
     def sample_singleton(self, k, n):
@@ -413,6 +430,9 @@ class Decoder(object):
                                      max_images=256)
 
         return rnn_outputs, rnn_states, output_logits
+
+    def _set_rewards(self, tensor):
+        self.rewards = tensor
 
     def _init_summaries(self):
         """Initialize the summaries of the decoder
