@@ -321,8 +321,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 # sample, compute sample probs, derive sample probs wrt params
                 sampling_result = tf_manager.execute_bandits(
-                    batch_dataset, [trainer], update=False,  # train=False?
-                    summaries=True, rewards=None)
+                    batch_dataset, [trainer], update=False,
+                    summaries=True, rewards=None, train=False)
                 sampled_outputs, sampled_logprobs, reg_cost = \
                     sampling_result[0].outputs[0]
 
@@ -364,7 +364,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 update_result = tf_manager.execute_bandits(
                     # trainer somehow needs 2 different executables
-                    batch_dataset, [trainer], update=True, summaries=True, rewards=rewards
+                    batch_dataset, [trainer], update=True, summaries=True, rewards=rewards, train=True
                 )
 
                 log("loss: {}".format(update_result[0].loss), color='red')

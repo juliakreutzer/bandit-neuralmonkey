@@ -81,14 +81,14 @@ class GenericBanditTrainer(object):
                               for l in [l1_cost, l2_cost] if l != 0.])
         self.gradients = _sum_gradients([regularizer_gradients, loss_gradients])
 
-        self.loss = tf.reduce_mean(tf.mul(tf.add_n(self.objective.loss_part), self.objective.grad_nondiff),[0,1])  # scalar  # TODO not correct! has logprobs now
+        self.loss = tf.reduce_mean(tf.mul(tf.add_n(self.objective.loss_part), self.objective.grad_nondiff), [0,1])  # scalar
 
         self.all_coders = set.union(collect_encoders(self.objective.decoder))
 
         self.clip_norm = clip_norm
 
         self.sample_op = self.objective.samples, grad_sum
-        self.update_op = self.optimizer.apply_gradients(self.gradients)  # TODO
+        self.update_op = self.optimizer.apply_gradients(self.gradients)
 
         for grad, var in self.gradients:
             if grad is not None:
@@ -119,8 +119,8 @@ class GenericBanditTrainer(object):
             return SampleBanditExecutable(self.all_coders,
                                          self.sample_op,
                                          self.regularizer_cost,
-                                         self.scalar_summaries if summaries else None,
-                                         self.histogram_summaries if summaries else None)
+                                         None,  # no summaries yet
+                                         None)
 
 
 def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:

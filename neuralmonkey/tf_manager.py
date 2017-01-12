@@ -69,9 +69,7 @@ class TensorFlowManager(object):
                 execution_scripts,
                 train=False,
                 summaries=True,
-                batch_size=None,
-                rewards=None,
-                update=False) -> List[ExecutionResult]:
+                batch_size=None) -> List[ExecutionResult]:
         if batch_size is None:
             batch_size = len(dataset)
         batched_dataset = dataset.batch_dataset(batch_size)
@@ -152,9 +150,9 @@ class TensorFlowManager(object):
                          tensors_to_execute,
                          add_feed_dict) = executable.next_to_execute(
                             reward=rewards)
-                       # log("tensors to execute")
-                       # log(tensors_to_execute)
+
                         all_feedables = all_feedables.union(feedables)
+
                         all_tensors_to_execute[executable] = tensors_to_execute
                         additional_feed_dicts.append(add_feed_dict)
                         tensor_list_lengths.append(len(tensors_to_execute))
@@ -162,10 +160,11 @@ class TensorFlowManager(object):
                         tensor_list_lengths.append(0)
 
                 feed_dict = _feed_dicts(batch, all_feedables, train=train)
+
                 for fdict in additional_feed_dicts:
                     feed_dict.update(fdict)
 
-                session_results = [sess.run(all_tensors_to_execute,
+                session_results = [sess.run(all_tensors_to_execute,  # TODO replace by partial_run
                                             feed_dict=feed_dict)
                                    for sess in self.sessions]
 

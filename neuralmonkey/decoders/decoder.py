@@ -104,6 +104,9 @@ class Decoder(object):
         self.go_symbols = tf.placeholder(tf.int32, shape=[None],
                                          name="decoder_go_symbols")
 
+        self.rewards = tf.placeholder(tf.float32, [None], name="rewards")  #
+        # self.rewards = tf.constant([1.]*1)  # FIXME make placeholder again
+
         # Construct the computation part of the graph
 
         embedded_train_inputs = self._embed_inputs(self.train_inputs[:-1])
@@ -140,7 +143,6 @@ class Decoder(object):
             self.vocabulary_size)
 
         self.sample_size = 1  # TODO make param
-        # self.runtime_logprobs: list of tensors [batch_size, self.vocabulary_size] of length max_output_len
         # FIXME add multiple samples
         self.sample_logprobs, self.sample_ids = self.sample_batch()  # timestep-length list of batch_size x 1
         self.sample_probs = [tf.exp(lp) for lp in self.sample_logprobs]  # timestep-length list of batch_size x sample_size tensors
@@ -149,11 +151,6 @@ class Decoder(object):
         self._init_summaries()
 
         log("Decoder initialized.")
-        log("runtime_logprobs:")
-        log(self.runtime_logprobs)
-
-        #self.rewards = tf.placeholder(tf.float32, [None])
-        self.rewards = tf.constant([1.]*1)  # FIXME make placeholder again
 
     @property
     def vocabulary_size(self):
@@ -426,9 +423,6 @@ class Decoder(object):
                                      max_images=256)
 
         return rnn_outputs, rnn_states, output_logits
-
-    def _set_rewards(self, tensor):
-        self.rewards = tensor
 
     def _init_summaries(self):
         """Initialize the summaries of the decoder
