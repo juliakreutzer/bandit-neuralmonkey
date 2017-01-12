@@ -18,9 +18,18 @@ ExecutionResult = NamedTuple('ExecutionResult',
                               ('image_summaries', tf.Summary)])
 BanditExecutionResult = NamedTuple('BanditExecutionResult',
                              [('outputs', List[Any]),
+                              ('loss', float),  # already averaged over batch
                               ('scalar_summaries', tf.Summary),
                               ('histogram_summaries', tf.Summary),
                               ('image_summaries', tf.Summary)])
+
+class BanditExecutable(object):
+
+    def next_to_execute(self, rewards: List[float]) -> NextExecute:
+        raise NotImplementedError()
+
+    def collect_results(self, results: List[Dict]) -> None:
+        raise NotImplementedError()
 
 
 class Executable(object):
@@ -56,7 +65,7 @@ class BaseRunner(object):
 
 
 def reduce_execution_results(
-        execution_results: List[ExecutionResult]) -> ExecutionResult:
+        execution_results: List):
     """Aggregate execution results into one."""
     outputs = []  # type: List[Any]
     bandit_result = any([type(e) is BanditExecutionResult for e in execution_results])
@@ -72,7 +81,13 @@ def reduce_execution_results(
         losses = [l / max(len(outputs), 1) for l in losses_sum]
     else:
         losses = None
-    return ExecutionResult(outputs, losses,
-                           execution_results[0].scalar_summaries,
-                           execution_results[0].histogram_summaries,
-                           execution_results[0].image_summaries)
+    if not bandit_result:
+        return ExecutionResult(outputs, losses,
+                               execution_results[0].scalar_summaries,
+                               execution_results[0].histogram_summaries,
+                               execution_results[0].image_summaries)
+    else:
+        return BanditExecutionResult(outputs, execution_results[0].loss,
+                               execution_results[0].scalar_summaries,
+                               execution_results[0].histogram_summaries,
+                               execution_results[0].image_summaries)

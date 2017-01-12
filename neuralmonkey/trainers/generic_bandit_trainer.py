@@ -6,10 +6,9 @@ from tensorflow.python.ops import variables
 from neuralmonkey.logging import log
 
 
-from neuralmonkey.runners.base_runner import (collect_encoders, Executable,
+from neuralmonkey.runners.base_runner import (collect_encoders, BanditExecutable,
                                               BanditExecutionResult,
-                                              ExecutionResult,
-                                              NextExecute)
+                                              NextExecute, ExecutionResult)
 
 # tests: lint, mypy
 
@@ -23,6 +22,7 @@ BanditObjective = NamedTuple('BanditObjective',
                         ('grad_diff', Gradients),
                         # must have gradients because
                         # loss might not be fully differentiable
+                        ('loss_part', Any),
                         ('sample_size', int),
                         ('clip_prob', Optional[float])])
 
@@ -46,6 +46,7 @@ class GenericBanditTrainer(object):
                  clip_norm=False, optimizer=None) -> None:
 
         self.optimizer = optimizer or tf.train.AdamOptimizer(learning_rate=learning_rate)
+        self.objective = objective
 
             #optimizer(learning_rate=learning_rate) or \
             #             tf.train.AdamOptimizer(learning_rate=learning_rate)
@@ -63,23 +64,14 @@ class GenericBanditTrainer(object):
         tf.scalar_summary('train_l1', l1_value, collections=["summary_train"])
         tf.scalar_summary('train_l2', l2_value, collections=["summary_train"])
 
-        # part of the gradients which is differentiable
-        # gradients for whole batch
-        log("grad_diff")
-        log(objective.grad_diff)  # max_len length list of batch_size x 1 tensors
-        log(len(objective.grad_diff))
+        # sum log probs over time steps (before: list over time steps)
+        grad_sum = tf.add_n(self.objective.grad_diff)  # batch_size x sample_size (1)
 
-        # sum log probs over time steps
-        grad_sum = tf.add_n(objective.grad_diff)
-        log("grad_sum")
-        log(grad_sum)  # batch_size x sample_size (1)
-
-        grad_scaled = tf.mul(objective.grad_nondiff, grad_sum)
-        log("grad_scaled")
-        log(grad_scaled)  # batch_size x sample_size (1)
+        # scale log probs by reward
+        grad_scaled = tf.mul(self.objective.grad_nondiff, grad_sum)  # batch_size x sample_size (1)
 
         # average over batch
-        grad_avg = tf.reduce_mean(grad_scaled, 0)
+        grad_avg = tf.reduce_mean(grad_scaled, [0,1])
 
         # partial gradients for full sequence
         loss_gradients = self._get_gradients(grad_avg)
@@ -88,14 +80,14 @@ class GenericBanditTrainer(object):
         regularizer_gradients = _sum_gradients([self._get_gradients(l)
                               for l in [l1_cost, l2_cost] if l != 0.])
         self.gradients = _sum_gradients([regularizer_gradients, loss_gradients])
-        log(self.gradients)
 
-        self.loss = grad_avg
-        self.all_coders = set.union(collect_encoders(objective.decoder))
+        self.loss = tf.reduce_mean(tf.mul(tf.add_n(self.objective.loss_part), self.objective.grad_nondiff),[0,1])  # scalar  # TODO not correct! has logprobs now
+
+        self.all_coders = set.union(collect_encoders(self.objective.decoder))
 
         self.clip_norm = clip_norm
 
-        self.sample_op = objective.samples
+        self.sample_op = self.objective.samples, grad_sum
         self.update_op = self.optimizer.apply_gradients(self.gradients)  # TODO
 
         for grad, var in self.gradients:
@@ -115,10 +107,10 @@ class GenericBanditTrainer(object):
         return gradient_list
 
     # pylint: disable=unused-argument
-    def get_executable(self, train=False, update=False, summaries=True) -> Executable:
+    def get_executable(self, train=False, update=False, summaries=True) -> BanditExecutable:
         if update:
             log("Update bandit")
-            return UpdateBanditExecutable(self.all_coders,
+            return UpdateBanditExecutable(self.all_coders, self.objective.decoder.rewards,
                                    self.update_op, self.loss,
                                    self.scalar_summaries if summaries else None,
                                    self.histogram_summaries if summaries else None)
@@ -155,25 +147,26 @@ def _clip_log_probs(log_probs, prob_threshold):
         return log_probs
 
 
-class UpdateBanditExecutable(Executable):
+class UpdateBanditExecutable(BanditExecutable):
 
-    def __init__(self, all_coders, update_op, losses, scalar_summaries,
+    def __init__(self, all_coders, reward_placeholder, update_op, loss, scalar_summaries,
                  histogram_summaries):
         self.all_coders = all_coders
+        self.reward_placeholder = reward_placeholder
         self.update_op = update_op
-        self.losses = losses
+        self.loss = loss
         self.scalar_summaries = scalar_summaries
         self.histogram_summaries = histogram_summaries
 
         self.result = None
 
-    def next_to_execute(self) -> NextExecute:
+    def next_to_execute(self, reward: List[float]) -> NextExecute:
         fetches = {'update_op': self.update_op}
         if self.scalar_summaries is not None:
             fetches['scalar_summaries'] = self.scalar_summaries
             fetches['histogram_summaries'] = self.histogram_summaries
-        fetches['losses'] = self.losses
-        return self.all_coders, fetches, {}
+        fetches['loss'] = self.loss
+        return self.all_coders, fetches, {self.reward_placeholder: reward}  # TODO add extra feed for reward
 
     def collect_results(self, results: List[Dict]) -> None:
         if self.scalar_summaries is None:
@@ -184,20 +177,13 @@ class UpdateBanditExecutable(Executable):
             scalar_summaries = results[0]['scalar_summaries']
             histogram_summaries = results[0]['histogram_summaries']
 
-        losses_sum = [0. for _ in self.losses]
-        for session_result in results:
-            for i in range(len(self.losses)):
-                # from the end, losses are last ones
-                losses_sum[i] += session_result['losses'][i]
-        avg_losses = [s / len(results) for s in losses_sum]
-
-        self.result = ExecutionResult(
-            [], losses=avg_losses, scalar_summaries=scalar_summaries,
+        self.result = BanditExecutionResult(
+            [], loss=results[0]['loss'], scalar_summaries=scalar_summaries,
             histogram_summaries=histogram_summaries,
             image_summaries=None)
 
 
-class SampleBanditExecutable(Executable):
+class SampleBanditExecutable(BanditExecutable):
 
     def __init__(self, all_coders, sample_op, regularization_cost, scalar_summaries,
                  histogram_summaries):
@@ -209,7 +195,7 @@ class SampleBanditExecutable(Executable):
 
         self.result = None
 
-    def next_to_execute(self) -> NextExecute:
+    def next_to_execute(self, reward=None) -> NextExecute:
         fetches = {'sample_op': self.sample_op}
         if self.scalar_summaries is not None:
             fetches['scalar_summaries'] = self.scalar_summaries
@@ -227,10 +213,11 @@ class SampleBanditExecutable(Executable):
             scalar_summaries = results[0]['scalar_summaries']
             histogram_summaries = results[0]['histogram_summaries']
 
-        sampled_outputs = self.sample_op
-        outputs = sampled_outputs, self.regularization_cost
+        sampled_outputs, sampled_logprobs = results[0]['sample_op']
+        reg_cost = results[0]['reg_cost']
+        outputs = sampled_outputs, sampled_logprobs, reg_cost # TODO make summaries for these values
         self.result = BanditExecutionResult(
-            [outputs],  # TODO
+            [outputs], loss=None, # TODO
             scalar_summaries=scalar_summaries,
             histogram_summaries=histogram_summaries,
             image_summaries=None)

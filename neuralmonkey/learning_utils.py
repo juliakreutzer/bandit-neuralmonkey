@@ -12,6 +12,7 @@ from neuralmonkey.tf_manager import TensorFlowManager
 from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
 from neuralmonkey.evaluators.bleu import BLEUEvaluator
+from neuralmonkey.hypothesis import Hypothesis
 
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
@@ -316,38 +317,57 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 step += 1
                 seen_instances += len(batch_dataset)
-                log("dataset_batch:")
-                log(batch_n)
+                log("dataset batch #{}".format(batch_n))
 
                 # sample, compute sample probs, derive sample probs wrt params
-                sampling_result = tf_manager.execute(
-                    # TODO build in bandit sampler here
+                sampling_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=False,  # train=False?
-                    summaries=True)
+                    summaries=True, rewards=None)
                 sampled_outputs, sampled_logprobs, reg_cost = \
-                    sampling_result['output']
+                    sampling_result[0].outputs[0]
 
-                log("sampled translations and gold translations")
-                log(zip(sampled_outputs, batch_dataset))
+                # ids to words
+                sample_arrays = [np.squeeze(o, 1) for o in sampled_outputs]
+                sentences = trainer.objective.decoder.vocabulary.vectors_to_sentences(sample_arrays)  # FIXME ugly
+
                 # evaluate samples
-                # sample_evaluation = evaluation(evaluators, batch_dataset,
-                #                               runners, None,
-                #                               sampled_outputs)  # losses cannot yet be computed
                 # TODO implement sentence-wise evaluator, e.g. sBLEU, check mixer
                 # TODO use evaluator specified in params
-                # rewards for full batch
-                rewards = BLEUEvaluator.bleu(sampled_outputs, batch_dataset)
 
-                # report sample probability
-                log("sample logprobs:")
-                log(sampled_logprobs)
+                eval_result = {}
+                rewards = []
+                for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
+                    #if (not batch_dataset.has_series(dataset_id) or
+                    #            generated_id not in result_data):
+                    #    continue
+
+                    desired_output = batch_dataset.get_series(dataset_id)
+                    log("desired vs generated, prob, evaluation")
+                  #  log([" ".join(d)+"  --  "+" ".join(s) for (d,s) in zip(desired_output, sentences)])
+
+                    eval_result[
+                        "{}/{}".format(generated_id, function.name)] = function(
+                        sentences, desired_output)
+
+                    for d, s, p in zip(desired_output, sentences, sampled_logprobs):
+                        r = function(s, d)
+                        b = BLEUEvaluator.bleu(s,d)
+                        print("ref: {}\nsample: {}\nprob: {}\nreward: {}\nbleu: {}".format(" ".join(d), " ".join(s), np.exp(np.sum(p)), r, b))
+                        rewards.append(b)
+
+
+                # TODO something is wrong with sentence BLEU, maybe fixable with sync?
+                log(eval_result)
+                log(np.mean(rewards))
 
                 # update model with samples and their rewards
 
-                _ = tf_manager.execute(
+                update_result = tf_manager.execute_bandits(
                     # trainer somehow needs 2 different executables
-                    batch_dataset, [trainer], update=True, summaries=True
+                    batch_dataset, [trainer], update=True, summaries=True, rewards=rewards
                 )
+
+                log("loss: {}".format(update_result[0].loss), color='red')
 
                 if step % logging_period == logging_period - 1:
 
@@ -485,7 +505,6 @@ def run_on_dataset(tf_manager: TensorFlowManager,
 
     contains_targets = all(dataset.has_series(runner.output_series)
                            for runner in runners)
-
     all_results = tf_manager.execute(dataset, runners,
                                      train=contains_targets,
                                      batch_size=batch_size)

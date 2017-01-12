@@ -142,13 +142,8 @@ class Decoder(object):
         self.sample_size = 1  # TODO make param
         # self.runtime_logprobs: list of tensors [batch_size, self.vocabulary_size] of length max_output_len
         # FIXME add multiple samples
-        self.sample_logprobs, self.sample_ids = self.sample_batch()
-        log("Sample logprobs:")
-        log(self.sample_logprobs)  # timestep-length list of batch_size x sample_size tensors
-        self.sample_probs = [tf.exp(lp) for lp in self.sample_logprobs]
-
-        log("Sample ids:")
-        log(self.sample_ids)  # timestep-length list of batch_size x 1
+        self.sample_logprobs, self.sample_ids = self.sample_batch()  # timestep-length list of batch_size x 1
+        self.sample_probs = [tf.exp(lp) for lp in self.sample_logprobs]  # timestep-length list of batch_size x sample_size tensors
 
         # Summaries
         self._init_summaries()
@@ -157,7 +152,8 @@ class Decoder(object):
         log("runtime_logprobs:")
         log(self.runtime_logprobs)
 
-        self.rewards = tf.placeholder(tf.float32, [None,1])
+        #self.rewards = tf.placeholder(tf.float32, [None])
+        self.rewards = tf.constant([1.]*1)  # FIXME make placeholder again
 
     @property
     def vocabulary_size(self):

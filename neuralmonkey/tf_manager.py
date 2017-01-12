@@ -13,8 +13,8 @@ import tensorflow as tf
 from neuralmonkey.logging import log
 from neuralmonkey.dataset import Dataset
 
-from neuralmonkey.runners.base_runner import (Executable, ExecutionResult,
-                                              reduce_execution_results)
+from neuralmonkey.runners.base_runner import (Executable, ExecutionResult, BanditExecutable,
+                                              reduce_execution_results, BanditExecutionResult)
 
 # tests: pylint,mypy
 
@@ -70,6 +70,7 @@ class TensorFlowManager(object):
                 train=False,
                 summaries=True,
                 batch_size=None,
+                rewards=None,
                 update=False) -> List[ExecutionResult]:
         if batch_size is None:
             batch_size = len(dataset)
@@ -119,6 +120,68 @@ class TensorFlowManager(object):
         for result_list in batch_results:
             collected_results.append(reduce_execution_results(result_list))
 
+        return collected_results
+
+    def execute_bandits(self,
+                        dataset: Dataset,
+                        execution_scripts,
+                        train=False,
+                        summaries=True,
+                        batch_size=None,
+                        rewards=None,
+                        update=False) -> List[BanditExecutionResult]:
+        if batch_size is None:
+            batch_size = len(dataset)
+        batched_dataset = dataset.batch_dataset(batch_size)
+
+        batch_results = [
+            [] for _ in execution_scripts]  # type: List[List[BanditExecutionResult]]
+        for batch in batched_dataset:
+            executables = [s.get_executable(train=train, summaries=summaries, update=update)
+                           for s in execution_scripts]
+            while not all(ex.result is not None for ex in executables):
+                all_feedables = set()  # type: Set[Any]
+                # type: Dict[BanditExecutable, tf.Tensor]
+                all_tensors_to_execute = {}
+                additional_feed_dicts = []
+                tensor_list_lengths = []  # type: List[int]
+
+                for executable in executables:
+                    if executable.result is None:
+                        (feedables,
+                         tensors_to_execute,
+                         add_feed_dict) = executable.next_to_execute(
+                            reward=rewards)
+                       # log("tensors to execute")
+                       # log(tensors_to_execute)
+                        all_feedables = all_feedables.union(feedables)
+                        all_tensors_to_execute[executable] = tensors_to_execute
+                        additional_feed_dicts.append(add_feed_dict)
+                        tensor_list_lengths.append(len(tensors_to_execute))
+                    else:
+                        tensor_list_lengths.append(0)
+
+                feed_dict = _feed_dicts(batch, all_feedables, train=train)
+                for fdict in additional_feed_dicts:
+                    feed_dict.update(fdict)
+
+                session_results = [sess.run(all_tensors_to_execute,
+                                            feed_dict=feed_dict)
+                                   for sess in self.sessions]
+
+                # fill executable.results with fetched values
+                for executable in executables:
+                    if executable.result is None:
+                        executable.collect_results(
+                            [res[executable] for res in session_results])
+
+            for script_list, executable in zip(batch_results, executables):
+                script_list.append(executable.result)
+
+        collected_results = []  # type: List[BanditExecutionResult]
+        for result_list in batch_results:
+            collected_results.append(reduce_execution_results(result_list))
+            collected_results.append(result_list)
         return collected_results
 
     def save(self, variable_files: Union[str, List[str]]) -> None:
