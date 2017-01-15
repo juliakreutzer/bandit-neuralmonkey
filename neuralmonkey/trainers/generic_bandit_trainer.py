@@ -111,13 +111,13 @@ class GenericBanditTrainer(object):
             return UpdateBanditExecutable(self.all_coders,
                                           self.objective.decoder.rewards,
                                           self.dummy, self.loss,
-                                          None,
-                                          None)
+                                          #None,
+                                          #None)
                                           # TODO fix, uncomment
-                                          #self.scalar_summaries
-                                          #if summaries else None,
-                                          #self.histogram_summaries
-                                          #if summaries else None)
+                                          self.scalar_summaries
+                                          if summaries else None,
+                                          self.histogram_summaries
+                                          if summaries else None)
         else:
             log("Sample bandit")
             return SampleBanditExecutable(self.all_coders,
@@ -179,7 +179,6 @@ class UpdateBanditExecutable(BanditExecutable):
             scalar_summaries = None
             histogram_summaries = None
         else:
-            # TODO collect summaries from different sessions
             scalar_summaries = results[0]['scalar_summaries']
             histogram_summaries = results[0]['histogram_summaries']
 
@@ -190,18 +189,15 @@ class UpdateBanditExecutable(BanditExecutable):
 
     def get_fetches(self):
         fetches = [self.update_op, self.loss]
-        #if self.scalar_summaries is not None:
-        #    fetches.extend(self.scalar_summaries)
-        #if self.histogram_summaries is not None:
-         #   fetches.extend(self.histogram_summaries)
+        if self.scalar_summaries is not None:
+            fetches.append(self.scalar_summaries)
+        if self.histogram_summaries is not None:
+            fetches.append(self.histogram_summaries)
         return fetches
 
     def get_feeds(self):
         feeds = []
-        #for coder in self.all_coders:
-        #    # need all placeholders of coders
-        #    log(coder)
-        #    feeds.extend(coder._get_placeholders())
+        # reward feed is in additional feed dict
         return feeds
 
 class SampleBanditExecutable(BanditExecutable):
@@ -230,7 +226,6 @@ class SampleBanditExecutable(BanditExecutable):
             scalar_summaries = None
             histogram_summaries = None
         else:
-            # TODO collect summaries from different sessions
             scalar_summaries = results[0]['scalar_summaries']
             histogram_summaries = results[0]['histogram_summaries']
 
@@ -238,7 +233,7 @@ class SampleBanditExecutable(BanditExecutable):
         reg_cost = results[0]['reg_cost']
         outputs = sampled_outputs, sampled_logprobs, reg_cost  # TODO make summaries for these values
         self.result = BanditExecutionResult(
-            [outputs], loss=None, # TODO
+            [outputs], loss=None,
             scalar_summaries=scalar_summaries,
             histogram_summaries=histogram_summaries,
             image_summaries=None)
