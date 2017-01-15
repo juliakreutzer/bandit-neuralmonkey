@@ -23,3 +23,7 @@ def adam_optimizer(learning_rate=1e-4):
 
 def adadelta_optimizer(**kwargs):
     return tf.train.AdadeltaOptimizer(**kwargs)
+
+
+def sgd_optimizer(learning_rate=1e-4):
+    return tf.train.GradientDescentOptimizer(learning_rate)

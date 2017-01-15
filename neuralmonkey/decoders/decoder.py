@@ -104,8 +104,7 @@ class Decoder(object):
         self.go_symbols = tf.placeholder(tf.int32, shape=[None],
                                          name="decoder_go_symbols")
 
-        self.rewards = tf.placeholder(tf.float32, [None], name="rewards")  #
-        # self.rewards = tf.constant([1.]*1)  # FIXME make placeholder again
+        self.rewards = tf.placeholder(tf.float32, [None], name="rewards")
 
         # Construct the computation part of the graph
 
@@ -190,7 +189,7 @@ class Decoder(object):
             #sample_logprobs.append(sample_logprob)
 
             # with gather and flattening
-            sample_id = tf.cast(tf.multinomial(p, 1), tf.int32) # batch_size x 1
+            sample_id = tf.cast(tf.multinomial(p, 1), tf.int32)  # batch_size x 1
             flat_p = tf.reshape(p, [-1])  # batch_size*vocab_size
             batch_size = tf.shape(sample_id)[0]
             # add correction to indices because of flattening
@@ -437,6 +436,14 @@ class Decoder(object):
 
         tf.scalar_summary("train_optimization_cost", self.train_loss,
                           collections=["summary_train"])
+
+    def _get_placeholders(self):
+        placeholders = [self.dropout_placeholder,
+                        self.rewards, self.go_symbols]
+        placeholders.extend([i for i in self.train_inputs])
+        placeholders.extend([w for w in self.train_weights])
+        log("placeholders from decoder {}".format(placeholders))
+        return placeholders
 
     def feed_dict(self, dataset, train=False):
         """Populate the feed dictionary for the decoder object

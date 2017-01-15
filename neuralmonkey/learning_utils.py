@@ -319,16 +319,19 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 seen_instances += len(batch_dataset)
                 log("dataset batch #{}".format(batch_n))
 
+                tf_manager.init_bandits([trainer])
+
                 # sample, compute sample probs, derive sample probs wrt params
                 sampling_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=False,
-                    summaries=True, rewards=None, train=False)
+                    summaries=True, rewards=None)
                 sampled_outputs, sampled_logprobs, reg_cost = \
                     sampling_result[0].outputs[0]
 
                 # ids to words
                 sample_arrays = [np.squeeze(o, 1) for o in sampled_outputs]
-                sentences = trainer.objective.decoder.vocabulary.vectors_to_sentences(sample_arrays)  # FIXME ugly
+                sentences = trainer.objective.decoder.vocabulary.\
+                    vectors_to_sentences(sample_arrays)  # FIXME ugly
 
                 # evaluate samples
                 # TODO implement sentence-wise evaluator, e.g. sBLEU, check mixer
@@ -337,34 +340,30 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 eval_result = {}
                 rewards = []
                 for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
-                    #if (not batch_dataset.has_series(dataset_id) or
-                    #            generated_id not in result_data):
-                    #    continue
 
                     desired_output = batch_dataset.get_series(dataset_id)
-                    log("desired vs generated, prob, evaluation")
-                  #  log([" ".join(d)+"  --  "+" ".join(s) for (d,s) in zip(desired_output, sentences)])
 
                     eval_result[
                         "{}/{}".format(generated_id, function.name)] = function(
                         sentences, desired_output)
 
-                    for d, s, p in zip(desired_output, sentences, sampled_logprobs):
+                    for d, s, p in zip(desired_output, sentences,
+                                       sampled_logprobs):
                         r = function(s, d)
                         b = BLEUEvaluator.bleu(s,d)
-                        print("ref: {}\nsample: {}\nprob: {}\nreward: {}\nbleu: {}".format(" ".join(d), " ".join(s), np.exp(np.sum(p)), r, b))
+                        print("ref: {}\nsample: {}\nprob: {}\nreward:"
+                              " {}\nbleu: {}".format(" ".join(d), " ".join(s),
+                                                     np.exp(np.sum(p)), r, b))  # TODO print nice, only few of them
                         rewards.append(b)
-
-
                 # TODO something is wrong with sentence BLEU, maybe fixable with sync?
-                log(eval_result)
-                log(np.mean(rewards))
 
                 # update model with samples and their rewards
+                summaries_bool = step % logging_period == logging_period - 1
 
                 update_result = tf_manager.execute_bandits(
                     # trainer somehow needs 2 different executables
-                    batch_dataset, [trainer], update=True, summaries=True, rewards=rewards, train=True
+                    batch_dataset, [trainer], update=True,
+                    summaries=summaries_bool, rewards=rewards, train=True
                 )
 
                 log("loss: {}".format(update_result[0].loss), color='red')
@@ -383,9 +382,6 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                                seen_instances,
                                                train_results,
                                                train=True)
-               # else:
-                #    tf_manager.execute(batch_dataset, [trainer],
-                 #                      train=True, summaries=False)  # TODO same as above
 
                 if step % validation_period == validation_period - 1:
                     val_results, val_outputs = run_on_dataset(

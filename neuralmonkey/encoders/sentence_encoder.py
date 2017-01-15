@@ -116,7 +116,10 @@ class SentenceEncoder(Attentive):
     def vocabulary_size(self):
         return len(self.vocabulary)
 
-
+    def _get_placeholders(self):
+        placeholders = [self.train_mode, self.inputs, self._input_mask]
+        log("placeholders from encoder: {}".format(placeholders))
+        return placeholders
 
     def _create_input_placeholders(self):
         """Creates input placeholder nodes in the computation graph"""

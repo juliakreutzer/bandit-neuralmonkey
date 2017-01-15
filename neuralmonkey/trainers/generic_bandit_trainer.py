@@ -2,13 +2,13 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 import re
 
 import tensorflow as tf
-from tensorflow.python.ops import variables
 from neuralmonkey.logging import log
 
 
-from neuralmonkey.runners.base_runner import (collect_encoders, BanditExecutable,
+from neuralmonkey.runners.base_runner import (collect_encoders,
+                                              BanditExecutable,
                                               BanditExecutionResult,
-                                              NextExecute, ExecutionResult)
+                                              NextExecute)
 
 # tests: lint, mypy
 
@@ -28,15 +28,9 @@ BanditObjective = NamedTuple('BanditObjective',
 
 BIAS_REGEX = re.compile(r'[Bb]ias')
 
+
 # pylint: disable=too-few-public-methods,too-many-locals
 class GenericBanditTrainer(object):
-
-    # TODO
-    # get sample and its probability
-    # compute gradient of sample w.r.t to weights
-    # get loss from outside graph
-    # compute stochastic gradient
-    # update model
 
     # FIXME
     # only one objective for now
@@ -45,11 +39,9 @@ class GenericBanditTrainer(object):
                  l1_weight=0.0, l2_weight=0.0, learning_rate=1e-4,
                  clip_norm=False, optimizer=None) -> None:
 
-        self.optimizer = optimizer or tf.train.AdamOptimizer(learning_rate=learning_rate)
+        self.optimizer = optimizer or tf.train.AdamOptimizer(
+            learning_rate=learning_rate)
         self.objective = objective
-
-            #optimizer(learning_rate=learning_rate) or \
-            #             tf.train.AdamOptimizer(learning_rate=learning_rate)
 
         with tf.variable_scope('regularization'):
             regularizable = [v for v in tf.trainable_variables()
@@ -65,10 +57,10 @@ class GenericBanditTrainer(object):
         tf.scalar_summary('train_l2', l2_value, collections=["summary_train"])
 
         # sum log probs over time steps (before: list over time steps)
-        grad_sum = tf.add_n(self.objective.grad_diff)  # batch_size x sample_size (1)
+        grad_sum = tf.add_n(self.objective.grad_diff)
 
-        # scale log probs by reward
-        grad_scaled = tf.mul(self.objective.grad_nondiff, grad_sum)  # batch_size x sample_size (1)
+        # scale log probs by reward (batch_size x sample_size)
+        grad_scaled = tf.mul(self.objective.grad_nondiff, grad_sum)
 
         # average over batch
         grad_avg = tf.reduce_mean(grad_scaled, [0,1])
@@ -81,7 +73,9 @@ class GenericBanditTrainer(object):
                               for l in [l1_cost, l2_cost] if l != 0.])
         self.gradients = _sum_gradients([regularizer_gradients, loss_gradients])
 
-        self.loss = tf.reduce_mean(tf.mul(tf.add_n(self.objective.loss_part), self.objective.grad_nondiff), [0,1])  # scalar
+        # scalar, avg over batch
+        self.loss = tf.reduce_mean(tf.mul(tf.add_n(self.objective.loss_part),
+                                          self.objective.grad_nondiff), [0, 1])
 
         self.all_coders = set.union(collect_encoders(self.objective.decoder))
 
@@ -89,6 +83,9 @@ class GenericBanditTrainer(object):
 
         self.sample_op = self.objective.samples, grad_sum
         self.update_op = self.optimizer.apply_gradients(self.gradients)
+
+        with tf.control_dependencies([self.update_op]):
+            self.dummy = tf.constant(0)
 
         for grad, var in self.gradients:
             if grad is not None:
@@ -107,20 +104,27 @@ class GenericBanditTrainer(object):
         return gradient_list
 
     # pylint: disable=unused-argument
-    def get_executable(self, train=False, update=False, summaries=True) -> BanditExecutable:
+    def get_executable(self, update=False, summaries=True) \
+            -> BanditExecutable:
         if update:
             log("Update bandit")
-            return UpdateBanditExecutable(self.all_coders, self.objective.decoder.rewards,
-                                   self.update_op, self.loss,
-                                   self.scalar_summaries if summaries else None,
-                                   self.histogram_summaries if summaries else None)
+            return UpdateBanditExecutable(self.all_coders,
+                                          self.objective.decoder.rewards,
+                                          self.dummy, self.loss,
+                                          None,
+                                          None)
+                                          # TODO fix, uncomment
+                                          #self.scalar_summaries
+                                          #if summaries else None,
+                                          #self.histogram_summaries
+                                          #if summaries else None)
         else:
             log("Sample bandit")
             return SampleBanditExecutable(self.all_coders,
-                                         self.sample_op,
-                                         self.regularizer_cost,
-                                         None,  # no summaries yet
-                                         None)
+                                          self.sample_op,
+                                          self.regularizer_cost,
+                                          None,  # no summaries yet
+                                          None)
 
 
 def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:
@@ -149,8 +153,8 @@ def _clip_log_probs(log_probs, prob_threshold):
 
 class UpdateBanditExecutable(BanditExecutable):
 
-    def __init__(self, all_coders, reward_placeholder, update_op, loss, scalar_summaries,
-                 histogram_summaries):
+    def __init__(self, all_coders, reward_placeholder, update_op, loss,
+                 scalar_summaries, histogram_summaries):
         self.all_coders = all_coders
         self.reward_placeholder = reward_placeholder
         self.update_op = update_op
@@ -166,7 +170,9 @@ class UpdateBanditExecutable(BanditExecutable):
             fetches['scalar_summaries'] = self.scalar_summaries
             fetches['histogram_summaries'] = self.histogram_summaries
         fetches['loss'] = self.loss
-        return self.all_coders, fetches, {self.reward_placeholder: reward}  # TODO add extra feed for reward
+        feedables = self.all_coders
+        # extra feed for reward
+        return feedables, fetches, {self.reward_placeholder: reward}
 
     def collect_results(self, results: List[Dict]) -> None:
         if self.scalar_summaries is None:
@@ -182,11 +188,26 @@ class UpdateBanditExecutable(BanditExecutable):
             histogram_summaries=histogram_summaries,
             image_summaries=None)
 
+    def get_fetches(self):
+        fetches = [self.update_op, self.loss]
+        #if self.scalar_summaries is not None:
+        #    fetches.extend(self.scalar_summaries)
+        #if self.histogram_summaries is not None:
+         #   fetches.extend(self.histogram_summaries)
+        return fetches
+
+    def get_feeds(self):
+        feeds = []
+        #for coder in self.all_coders:
+        #    # need all placeholders of coders
+        #    log(coder)
+        #    feeds.extend(coder._get_placeholders())
+        return feeds
 
 class SampleBanditExecutable(BanditExecutable):
 
-    def __init__(self, all_coders, sample_op, regularization_cost, scalar_summaries,
-                 histogram_summaries):
+    def __init__(self, all_coders, sample_op, regularization_cost,
+                 scalar_summaries, histogram_summaries):
         self.all_coders = all_coders
         self.sample_op = sample_op
         self.scalar_summaries = scalar_summaries
@@ -215,9 +236,27 @@ class SampleBanditExecutable(BanditExecutable):
 
         sampled_outputs, sampled_logprobs = results[0]['sample_op']
         reg_cost = results[0]['reg_cost']
-        outputs = sampled_outputs, sampled_logprobs, reg_cost # TODO make summaries for these values
+        outputs = sampled_outputs, sampled_logprobs, reg_cost  # TODO make summaries for these values
         self.result = BanditExecutionResult(
             [outputs], loss=None, # TODO
             scalar_summaries=scalar_summaries,
             histogram_summaries=histogram_summaries,
             image_summaries=None)
+
+    def get_fetches(self):
+        fetches = [self.regularization_cost]
+        samples, logprobs = self.sample_op
+        fetches.extend(samples)
+        fetches.append(logprobs)
+        if self.scalar_summaries is not None:
+            fetches.extend(self.scalar_summaries)
+        if self.histogram_summaries is not None:
+            fetches.extend(self.histogram_summaries)
+        return fetches
+
+    def get_feeds(self):
+        feeds = []
+        for coder in self.all_coders:
+            # need all placeholders of coders
+            feeds.extend(coder._get_placeholders())
+        return feeds

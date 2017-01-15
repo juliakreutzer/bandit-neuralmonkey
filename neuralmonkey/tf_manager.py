@@ -120,6 +120,35 @@ class TensorFlowManager(object):
 
         return collected_results
 
+    def init_bandits(self, execution_scripts):
+        # prepare partial run
+        # need all feeds and all fetches
+        log(execution_scripts)
+        all_feeds = []
+        [all_feeds.extend(s.get_executable(summaries=True,
+                                        update=True).get_feeds())
+                       for s in execution_scripts]
+        [all_feeds.extend(s.get_executable(summaries=True, update=False).get_feeds()) for s in execution_scripts]
+        log("all feeds")
+        log(all_feeds)
+        log(len(all_feeds))
+        all_fetches = []
+        [all_fetches.extend(s.get_executable(summaries=True,
+                                             update=True).get_fetches())
+                     for s in execution_scripts]  # TODO only add rewards as feed for update
+        [all_fetches.extend(s.get_executable(summaries=True,
+                                             update=False).get_fetches()) for s
+             in execution_scripts]
+        # TODO make sure no duplicates are in there... same encoder and decoder are used! only get them once for each en/decoder
+
+        log("all fetches")
+        log(all_fetches)
+        # TODO fetches and feeds need to be lists
+
+        # execution scripts include sampling and updating
+        self.handlers = [sess.partial_run_setup(all_fetches, all_feeds) for sess in self.sessions]
+        log(self.handlers)
+
     def execute_bandits(self,
                         dataset: Dataset,
                         execution_scripts,
@@ -135,7 +164,8 @@ class TensorFlowManager(object):
         batch_results = [
             [] for _ in execution_scripts]  # type: List[List[BanditExecutionResult]]
         for batch in batched_dataset:
-            executables = [s.get_executable(train=train, summaries=summaries, update=update)
+            executables = [s.get_executable(summaries=summaries,
+                                            update=update)
                            for s in execution_scripts]
             while not all(ex.result is not None for ex in executables):
                 all_feedables = set()  # type: Set[Any]
@@ -164,9 +194,26 @@ class TensorFlowManager(object):
                 for fdict in additional_feed_dicts:
                     feed_dict.update(fdict)
 
-                session_results = [sess.run(all_tensors_to_execute,  # TODO replace by partial_run
-                                            feed_dict=feed_dict)
-                                   for sess in self.sessions]
+
+                log("update {}".format(update))
+                if update:
+                    update_dict = {}
+                    for fdict in additional_feed_dicts:
+                        update_dict.update(fdict)
+                    feed_dict = update_dict  # FIXME hack to only feed new feed
+
+                # session_results = [sess.run(all_tensors_to_execute,  # TODO replace by partial_run sess.partial_run(self.handler,...)
+                #                            feed_dict=feed_dict)
+                #                   for sess in self.sessions]
+                log("all tensors to execute")
+                log(all_tensors_to_execute)
+
+                log("feed_dict")
+                log(feed_dict)
+                session_results = [sess.partial_run(h, all_tensors_to_execute, feed_dict=feed_dict) for sess, h in zip(self.sessions, self.handlers)]
+                # TODO remove additional feeds from sampling part
+                log("sess results")
+                log(session_results)
 
                 # fill executable.results with fetched values
                 for executable in executables:
