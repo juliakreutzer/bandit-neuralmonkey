@@ -11,6 +11,7 @@ from typing import Any, List, Union
 import numpy as np
 import tensorflow as tf
 from neuralmonkey.dataset import Dataset
+from neuralmonkey.logging import log
 
 from neuralmonkey.runners.base_runner import (Executable, ExecutionResult, BanditExecutable,
                                               reduce_execution_results, BanditExecutionResult)

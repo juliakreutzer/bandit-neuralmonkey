@@ -118,7 +118,7 @@ class SentenceEncoder(Attentive):
 
     def _get_placeholders(self):
         placeholders = [self.train_mode, self.inputs, self._input_mask]
-        log("placeholders from encoder: {}".format(placeholders))
+        #log("placeholders from encoder: {}".format(placeholders))
         return placeholders
 
     def _create_input_placeholders(self):

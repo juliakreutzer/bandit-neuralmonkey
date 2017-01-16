@@ -141,10 +141,18 @@ class Decoder(object):
             self.train_logits, self.train_targets, self.train_weights,
             self.vocabulary_size)
 
-        self.sample_size = 1  # TODO make param
+        self.sample_size = 1  # TODO make param and use
         # FIXME add multiple samples
         self.sample_logprobs, self.sample_ids = self.sample_batch()  # timestep-length list of batch_size x 1
         self.sample_probs = [tf.exp(lp) for lp in self.sample_logprobs]  # timestep-length list of batch_size x sample_size tensors
+
+        # second sample, needed for some bandit objectives
+        # TODO find better way of sampling pairs
+        self.sample_logprobs_2, self.sample_ids_2 = self.sample_batch()
+        self.sample_probs_2 = [tf.exp(lp) for lp in self.sample_logprobs_2]
+        self.pair_logprobs = [tf.add(i,j) for i,j in zip(self.sample_logprobs,
+                                                         self.sample_logprobs_2)]
+        self.pair_probs = [tf.exp(lp) for lp in self.pair_logprobs]
 
         # Summaries
         self._init_summaries()
@@ -442,7 +450,7 @@ class Decoder(object):
                         self.rewards, self.go_symbols]
         placeholders.extend([i for i in self.train_inputs])
         placeholders.extend([w for w in self.train_weights])
-        log("placeholders from decoder {}".format(placeholders))
+        #log("placeholders from decoder {}".format(placeholders))
         return placeholders
 
     def feed_dict(self, dataset, train=False):

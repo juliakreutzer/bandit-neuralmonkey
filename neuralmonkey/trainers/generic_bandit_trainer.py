@@ -4,6 +4,8 @@ import re
 import tensorflow as tf
 from neuralmonkey.logging import log
 
+import numpy as np
+
 
 from neuralmonkey.runners.base_runner import (collect_encoders,
                                               BanditExecutable,
@@ -18,13 +20,9 @@ BanditObjective = NamedTuple('BanditObjective',
                        [('name', str),
                         ('decoder', Any),
                         ('samples', Any),  # TODO better type
-                        ('grad_nondiff', Gradients),
-                        ('grad_diff', Gradients),
-                        # must have gradients because
-                        # loss might not be fully differentiable
-                        ('loss_part', Any),
-                        ('sample_size', int),
-                        ('clip_prob', Optional[float])])
+                        ('sample_logprobs', Any),
+                        ('loss', Any),
+                        ('sample_size', int)])
 
 BIAS_REGEX = re.compile(r'[Bb]ias')
 
@@ -42,6 +40,7 @@ class GenericBanditTrainer(object):
         self.optimizer = optimizer or tf.train.AdamOptimizer(
             learning_rate=learning_rate)
         self.objective = objective
+        log("objective: {}".format(self.objective))
 
         with tf.variable_scope('regularization'):
             regularizable = [v for v in tf.trainable_variables()
@@ -57,31 +56,21 @@ class GenericBanditTrainer(object):
         tf.scalar_summary('train_l2', l2_value, collections=["summary_train"])
 
         # sum log probs over time steps (before: list over time steps)
-        grad_sum = tf.add_n(self.objective.grad_diff)
+        #sample_logprobs = tf.add_n(self.objective.grad_diff)
 
-        # scale log probs by reward (batch_size x sample_size)
-        grad_scaled = tf.mul(self.objective.grad_nondiff, grad_sum)
+        # TODO use several objectives
 
-        # average over batch
-        grad_avg = tf.reduce_mean(grad_scaled, [0,1])
+        # loss is scalar, avg over batch
+        log("loss: {}".format(self.objective.loss))
+        self.loss = self.objective.loss + self.regularizer_cost
+        self.gradients = self.optimizer.compute_gradients(self.loss)
 
-        # partial gradients for full sequence
-        loss_gradients = self._get_gradients(grad_avg)
-
-        # add gradients for regularization
-        regularizer_gradients = _sum_gradients([self._get_gradients(l)
-                              for l in [l1_cost, l2_cost] if l != 0.])
-        self.gradients = _sum_gradients([regularizer_gradients, loss_gradients])
-
-        # scalar, avg over batch
-        self.loss = tf.reduce_mean(tf.mul(tf.add_n(self.objective.loss_part),
-                                          self.objective.grad_nondiff), [0, 1])
 
         self.all_coders = set.union(collect_encoders(self.objective.decoder))
 
         self.clip_norm = clip_norm
 
-        self.sample_op = self.objective.samples, grad_sum
+        self.sample_op = self.objective.samples, self.objective.sample_logprobs
         self.update_op = self.optimizer.apply_gradients(self.gradients)
 
         with tf.control_dependencies([self.update_op]):
@@ -143,8 +132,9 @@ def _clip_log_probs(log_probs, prob_threshold):
     """ Clip log probabilities to some threshold """
     # threshold is prob, input are log probs
     if prob_threshold > 0.00:
-        log_threshold = tf.log(prob_threshold)
-        log_max_value = tf.log(1)
+        log("Clipping probs <= {}".format(prob_threshold))
+        log_threshold = np.log(prob_threshold)
+        log_max_value = tf.log(tf.constant(1.0))
         return tf.clip_by_value(log_probs, clip_value_min=log_threshold,
                             clip_value_max=log_max_value)
     else:
