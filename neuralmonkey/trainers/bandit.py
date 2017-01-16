@@ -62,7 +62,7 @@ class ExpectedLossTrainer(GenericBanditTrainer):
         super(ExpectedLossTrainer, self).__init__(
             objective, l1_weight, l2_weight, learning_rate=learning_rate,
             clip_norm=clip_norm,
-            optimizer=optimizer)
+            optimizer=optimizer, pairwise=False)
 
 
 class CrossEntropyTrainer(GenericBanditTrainer):
@@ -73,7 +73,7 @@ class CrossEntropyTrainer(GenericBanditTrainer):
         super(CrossEntropyTrainer, self).__init__(
             objective, l1_weight, l2_weight, learning_rate=learning_rate,
             clip_norm=clip_norm,
-            optimizer=optimizer)
+            optimizer=optimizer, pairwise=False)
 
 
 class PairwiseTrainer(GenericBanditTrainer):
@@ -84,4 +84,4 @@ class PairwiseTrainer(GenericBanditTrainer):
         super(PairwiseTrainer, self).__init__(
             objective, l1_weight, l2_weight, learning_rate=learning_rate,
             clip_norm=clip_norm,
-            optimizer=optimizer)
+            optimizer=optimizer, pairwise=True)

@@ -59,7 +59,7 @@ def mlp_output(layer_sizes, dropout_plc=None, activation=tf.tanh):
     (Pascanu et al., 2013 [https://arxiv.org/pdf/1312.6026v5.pdf])
 
     Arguments:
-        layer_sizes: A list of sizes of the hiddel layers of the MLP
+        layer_sizes: A list of sizes of the hidden layers of the MLP
         dropout_plc: Dropout placeholder. TODO this is not going to work with
             current configuration
         activation: The activation function to use in each layer.

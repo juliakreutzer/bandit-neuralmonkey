@@ -12,7 +12,6 @@ from neuralmonkey.tf_manager import TensorFlowManager
 from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
 from neuralmonkey.evaluators.bleu import BLEUEvaluator
-from neuralmonkey.hypothesis import Hypothesis
 
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
@@ -309,7 +308,6 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
         for i in range(epochs):
             log_print("")
             log("Epoch {} starts".format(i + 1), color='red')
-
             train_dataset.shuffle()
             train_batched_datasets = train_dataset.batch_dataset(batch_size)
 
@@ -321,41 +319,103 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 tf_manager.init_bandits([trainer])
 
-                # sample, compute sample probs, derive sample probs wrt params
+                # sample, compute sample probs
                 sampling_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=False,
                     summaries=True, rewards=None)
                 sampled_outputs, sampled_logprobs, reg_cost = \
                     sampling_result[0].outputs[0]
 
-                # ids to words
-                sample_arrays = [np.squeeze(o, 1) for o in sampled_outputs]
-                sentences = trainer.objective.decoder.vocabulary.\
-                    vectors_to_sentences(sample_arrays)  # FIXME ugly
+                # sampled_outputs: batch x max_len x sample_size (now 1)
 
-                # evaluate samples
-                # TODO implement sentence-wise evaluator, e.g. sBLEU, check mixer
-                # TODO use evaluator specified in params
-
-                eval_result = {}
                 rewards = []
-                for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
+                # for objectives with pairs of samples
+                if trainer.pairwise:
+                    log("Evaluating pairs of samples.")
 
-                    desired_output = batch_dataset.get_series(dataset_id)
+                    # sampled_outputs and sampled_logprobs contains 2 samples
+                    # for each sentence
 
-                    eval_result[
-                        "{}/{}".format(generated_id, function.name)] = function(
-                        sentences, desired_output)
+                    samples_1, samples_2 = sampled_outputs  # time is 1.dimension!
+                    sample_arrays_1 = [np.squeeze(o, 1) for o in samples_1]
+                    sample_arrays_2 = [np.squeeze(o, 1) for o in samples_2]
 
-                    for d, s, p in zip(desired_output, sentences,
-                                       sampled_logprobs):
-                        r = function(s, d)
-                        b = BLEUEvaluator.bleu(s,d)
-                        print("ref: {}\nsample: {}\nprob: {}\nreward:"
-                              " {}\nbleu: {}".format(" ".join(d), " ".join(s),
-                                                     np.exp(np.sum(p)), r, b))  # TODO print nice, only few of them
-                        rewards.append(b)
-                # TODO something is wrong with sentence BLEU, maybe fixable with sync?
+                    sentences_1 = trainer.objective.decoder.vocabulary. \
+                        vectors_to_sentences(sample_arrays_1)
+                    sentences_2 = trainer.objective.decoder.vocabulary. \
+                        vectors_to_sentences(sample_arrays_2)
+
+                    logprobs_1, logprobs_2 = sampled_logprobs
+
+                    eval_result_1 = {}
+                    eval_result_2 = {}
+
+                    for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
+
+                        desired_output = batch_dataset.get_series(dataset_id)
+
+                        eval_result_1[
+                            "{}/{}".format(generated_id, function.name)] = function(
+                            sentences_1, desired_output)
+
+                        eval_result_2[
+                            "{}/{}".format(generated_id, function.name)] = function(
+                            sentences_2, desired_output)
+
+                        for d, s1, s2, p1, p2 in zip(desired_output, sentences_1,
+                                           sentences_2, logprobs_1, logprobs_2):
+                            r1 = function(s1, d)
+                            r2 = function(s2, d)
+                            b1 = BLEUEvaluator.bleu(s1, d)
+                            b2 = BLEUEvaluator.bleu(s2, d)
+                            print("ref: {}\nsample_1: {}\nprob: {}\nreward:"
+                                  " {}\nbleu: {}\nsample_2: {}\nprob: {}\nreward:"
+                                  " {}\nbleu: {}".format(" ".join(d),
+                                                         " ".join(s1),
+                                                         np.exp(np.sum(p1)), r1,
+                                                         b1, " ".join(s2),
+                                                         np.exp(np.sum(p2)), r2,
+                                                         b2))  # TODO print nice, only few of them
+                            print("diff bleu: {}, diff prob: {}".
+                                  format((b1-b2), (np.sum(p1)-np.sum(p2))))
+                            rewards.append(b1-b2)  # TODO different pairwise reward definitions
+
+
+
+
+                # for objectives with one sample for each sentence
+                else:
+                    log("Evaluating single samples.")
+
+                    # ids to words
+                    # sample dimension is squeezed
+                    sample_arrays = [np.squeeze(o, 1) for o in sampled_outputs]
+
+                    sentences = trainer.objective.decoder.vocabulary.\
+                        vectors_to_sentences(sample_arrays)  # FIXME ugly
+
+                    # evaluate samples
+                    # TODO implement sentence-wise evaluator, e.g. sBLEU, check mixer
+                    # TODO use evaluator specified in params
+
+                    eval_result = {}
+                    for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
+
+                        desired_output = batch_dataset.get_series(dataset_id)
+
+                        eval_result[
+                            "{}/{}".format(generated_id, function.name)] = function(
+                            sentences, desired_output)
+
+                        for d, s, p in zip(desired_output, sentences,
+                                           sampled_logprobs):
+                            r = function(s, d)
+                            b = BLEUEvaluator.bleu(s,d)
+                            print("ref: {}\nsample: {}\nprob: {}\nreward:"
+                                  " {}\nbleu: {}".format(" ".join(d), " ".join(s),
+                                                         np.exp(np.sum(p)), r, b))  # TODO print nice, only few of them
+                            rewards.append(b)
+                    # TODO something is wrong with sentence BLEU, maybe fixable with sync?
 
                 # update model with samples and their rewards
                 summaries_bool = step % logging_period == logging_period - 1
@@ -367,6 +427,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 )
 
                 log("loss: {}".format(update_result[0].loss), color='red')
+
 
                 if step % logging_period == logging_period - 1:
 

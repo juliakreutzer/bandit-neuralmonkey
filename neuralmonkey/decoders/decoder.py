@@ -7,7 +7,7 @@ from neuralmonkey.nn.ortho_gru_cell import OrthoGRUCell
 from neuralmonkey.vocabulary import START_TOKEN
 from neuralmonkey.logging import log
 from neuralmonkey.decoders.output_projection import no_deep_output
-from neuralmonkey.nn.projection import linear
+from neuralmonkey.nn.projection import linear, nonlinear
 
 
 class Decoder(object):
@@ -124,6 +124,12 @@ class Decoder(object):
             = self._attention_decoder(
                 runtime_inputs, state, runtime_mode=True)
 
+        # logits if last layer's weights were negated
+        _, _, self.runtime_logits_neg = self._attention_decoder(runtime_inputs,
+                                                                state,
+                                                                runtime_mode=True,
+                                                                neg=True)
+
         self.train_logprobs = [tf.nn.log_softmax(l) for l in self.train_logits]
         self.runtime_logprobs = [tf.nn.log_softmax(l) for
                                  l in self.runtime_logits]
@@ -143,14 +149,18 @@ class Decoder(object):
 
         self.sample_size = 1  # TODO make param and use
         # FIXME add multiple samples
-        self.sample_logprobs, self.sample_ids = self.sample_batch()  # timestep-length list of batch_size x 1
+        self.sample_logprobs, sample_ids = self.sample_batch()  # timestep-length list of batch_size x 1
+        self.sample_ids = tf.pack(sample_ids) # time x batch x sample_size
+
         self.sample_probs = [tf.exp(lp) for lp in self.sample_logprobs]  # timestep-length list of batch_size x sample_size tensors
 
         # second sample, needed for some bandit objectives
-        # TODO find better way of sampling pairs
-        self.sample_logprobs_2, self.sample_ids_2 = self.sample_batch()
+        # TODO find other way of sampling pairs
+        # TODO does that make sense?
+        self.sample_logprobs_2, sample_ids_2 = self.sample_batch(neg=True)
+        self.sample_ids_2 = tf.pack(sample_ids_2)
         self.sample_probs_2 = [tf.exp(lp) for lp in self.sample_logprobs_2]
-        self.pair_logprobs = [tf.add(i,j) for i,j in zip(self.sample_logprobs,
+        self.pair_logprobs = [i-j for i, j in zip(self.sample_logprobs,
                                                          self.sample_logprobs_2)]
         self.pair_probs = [tf.exp(lp) for lp in self.pair_logprobs]
 
@@ -177,16 +187,26 @@ class Decoder(object):
         # the array is of tuples ([values], [indices])
         return [tf.nn.top_k(p, k_best) for p in self.runtime_logprobs]
 
-    def sample_batch(self):
+    def sample_batch(self, neg=False):
         """
         Sample a target words for the full batch and return its ids and
         log probabilities
-        :param k:
+        :param neg: whether to sample from negative model distribution
         :return:
         """
         sample_ids = []
         sample_logprobs = []
-        for p in self.runtime_logprobs:  # time steps
+
+        model_logprob = self.runtime_logits
+
+        log("neg in sample {}".format(neg))
+
+        # sampling from negative weights of last layer
+        if neg:
+            model_logprob = self.runtime_logits_neg
+
+        for p in model_logprob:  # time steps
+
             # with gather_nd
             # FIXME no gradients implemented yet
             #sample_id = tf.squeeze(tf.cast(tf.multinomial(p, 1), tf.int32))
@@ -347,7 +367,7 @@ class Decoder(object):
                                                  previous_word)
         return self._dropout(input_embedding)
 
-    def _logit_function(self, rnn_output):
+    def _logit_function(self, rnn_output, neg=False):
         """Compute logits on the vocabulary given the state
 
         This variant simply linearly project the vectors to fit
@@ -360,12 +380,14 @@ class Decoder(object):
         Returns:
             A Tensor of shape batch_size x vocabulary_size
         """
-        return linear(self._dropout(rnn_output), self.vocabulary_size)
+        return linear(self._dropout(rnn_output), self.vocabulary_size, bias=True,
+                      neg=neg,
+                      scope="logit_function")
 
     # pylint: disable=too-many-arguments
     # TODO reduce the number of arguments
     def _attention_decoder(self, inputs, initial_state, runtime_mode=False,
-                           scope="attention_decoder"):
+                           scope="attention_decoder", neg=False):
         """Run the decoder RNN.
 
         Arguments:
@@ -394,7 +416,7 @@ class Decoder(object):
             _, state = cell(
                 tf.concat(1, [inputs[0]] + contexts), initial_state)
 
-            logit = self._logit_function(output)
+            logit = self._logit_function(output, neg)
 
             output_logits = [logit]
             rnn_outputs = [output]
@@ -414,7 +436,7 @@ class Decoder(object):
                 _, state = cell(
                     tf.concat(1, [current_input] + contexts), state)
 
-                logit = self._logit_function(output)
+                logit = self._logit_function(output, neg)
 
                 output_logits.append(logit)
                 rnn_outputs.append(output)
@@ -425,7 +447,7 @@ class Decoder(object):
                     alignments = tf.expand_dims(tf.transpose(
                         tf.pack(a.attentions_in_time), perm=[1, 2, 0]), -1)
 
-                    tf.image_summary("attention_{}".format(i), alignments,
+                    tf.image_summary("attention_{}_{}".format(i, neg), alignments,
                                      collections=["summary_val_plots"],
                                      max_images=256)
 

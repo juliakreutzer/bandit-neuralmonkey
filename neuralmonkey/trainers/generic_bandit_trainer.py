@@ -35,12 +35,13 @@ class GenericBanditTrainer(object):
 
     def __init__(self, objective: BanditObjective,
                  l1_weight=0.0, l2_weight=0.0, learning_rate=1e-4,
-                 clip_norm=False, optimizer=None) -> None:
+                 clip_norm=False, optimizer=None, pairwise=False) -> None:
 
         self.optimizer = optimizer or tf.train.AdamOptimizer(
             learning_rate=learning_rate)
         self.objective = objective
-        log("objective: {}".format(self.objective))
+
+        self.pairwise = pairwise
 
         with tf.variable_scope('regularization'):
             regularizable = [v for v in tf.trainable_variables()
@@ -55,13 +56,9 @@ class GenericBanditTrainer(object):
         tf.scalar_summary('train_l1', l1_value, collections=["summary_train"])
         tf.scalar_summary('train_l2', l2_value, collections=["summary_train"])
 
-        # sum log probs over time steps (before: list over time steps)
-        #sample_logprobs = tf.add_n(self.objective.grad_diff)
-
         # TODO use several objectives
 
         # loss is scalar, avg over batch
-        log("loss: {}".format(self.objective.loss))
         self.loss = self.objective.loss + self.regularizer_cost
         self.gradients = self.optimizer.compute_gradients(self.loss)
 
@@ -96,19 +93,14 @@ class GenericBanditTrainer(object):
     def get_executable(self, update=False, summaries=True) \
             -> BanditExecutable:
         if update:
-            log("Update bandit")
             return UpdateBanditExecutable(self.all_coders,
                                           self.objective.decoder.rewards,
                                           self.dummy, self.loss,
-                                          #None,
-                                          #None)
-                                          # TODO fix, uncomment
                                           self.scalar_summaries
                                           if summaries else None,
                                           self.histogram_summaries
                                           if summaries else None)
         else:
-            log("Sample bandit")
             return SampleBanditExecutable(self.all_coders,
                                           self.sample_op,
                                           self.regularizer_cost,
@@ -231,7 +223,7 @@ class SampleBanditExecutable(BanditExecutable):
     def get_fetches(self):
         fetches = [self.regularization_cost]
         samples, logprobs = self.sample_op
-        fetches.extend(samples)
+        fetches.append(samples)
         fetches.append(logprobs)
         if self.scalar_summaries is not None:
             fetches.extend(self.scalar_summaries)

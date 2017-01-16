@@ -385,6 +385,7 @@ class Vocabulary(collections.Sized):
 
         Arguments:
             vectors: List of vectors of vocabulary indices.
+            First dimension of list is time, second is batch
 
         Returns:
             List of lists of words.
