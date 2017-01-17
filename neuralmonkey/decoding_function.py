@@ -4,7 +4,7 @@ for RNN decoders.
 
 See http://arxiv.org/abs/1606.07481
 """
-# tests: lint
+# tests: lint, mypy
 
 import tensorflow as tf
 from neuralmonkey.nn.projection import linear
@@ -17,8 +17,7 @@ class Attention(object):
     # For maintaining the same API as in CoverageAttention
 
     def __init__(self, attention_states, scope,
-                 input_weights=None, attention_fertility=None,
-                 runtime_mode=False):
+                 input_weights=None, attention_fertility=None):
         """Create the attention object.
 
         Args:
@@ -29,10 +28,9 @@ class Attention(object):
             input_weights: (Optional) The padding weights on the input.
             attention_fertility: (Optional) For the Coverage attention
                 compatibilty, maximum fertility of one word.
-            runtime_mode: (Optional) Indicates whether the object will be used
-                          for runtime decoding.
         """
         self.scope = scope
+        self.logits_in_time = []
         self.attentions_in_time = []
         self.attention_states = attention_states
         self.input_weights = input_weights
@@ -93,6 +91,7 @@ class Attention(object):
                 norm = tf.reduce_sum(a_all, 1, keep_dims=True) + 1e-8
                 a = a_all / norm
 
+            self.logits_in_time.append(s)
             self.attentions_in_time.append(a)
 
             # Now calculate the attention-weighted vector d.

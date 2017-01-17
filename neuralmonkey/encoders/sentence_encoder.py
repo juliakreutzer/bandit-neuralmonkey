@@ -76,29 +76,25 @@ class SentenceEncoder(Attentive):
         self.use_noisy_activations = use_noisy_activations
         self.parent_encoder = parent_encoder
 
-        self._input_mask = tf.placeholder(
-            tf.float32, shape=[None, self.max_input_len],
-            name="encoder_padding")
-
-        self.sentence_lengths = tf.to_int32(
-            tf.reduce_sum(self._input_mask, 1))
-
         log("Initializing sentence encoder, name: '{}'"
             .format(self.name))
 
         with tf.variable_scope(self.name):
             self._create_input_placeholders()
-            self._create_embedding_matrix()
+            with tf.variable_scope('input_projection'):
+                self._create_embedding_matrix()
+                embedded_inputs = self._embed(self.inputs)  # type: tf.Tensor
 
-            embedded_inputs = self._embed(self.inputs)  # type: tf.Tensor
             fw_cell, bw_cell = self.rnn_cells()  # type: RNNCellTuple
 
             self.outputs_bidi_tup, encoded_tup = tf.nn.bidirectional_dynamic_rnn(
                 fw_cell, bw_cell, embedded_inputs, self.sentence_lengths,
                 dtype=tf.float32)
 
-            self.__attention_tensor = tf.concat(2, self.outputs_bidi_tup)
-            self.__attention_tensor = self._dropout(self.__attention_tensor)
+            with tf.variable_scope('attention_tensor'):
+                self.__attention_tensor = tf.concat(2, self.outputs_bidi_tup)
+                self.__attention_tensor = self._dropout(
+                    self.__attention_tensor)
 
             self.encoded = tf.concat(1, encoded_tup)
 
@@ -116,8 +112,6 @@ class SentenceEncoder(Attentive):
     def vocabulary_size(self):
         return len(self.vocabulary)
 
-
-
     def _create_input_placeholders(self):
         """Creates input placeholder nodes in the computation graph"""
         self.train_mode = tf.placeholder(tf.bool, shape=[],
@@ -127,6 +121,12 @@ class SentenceEncoder(Attentive):
                                      shape=[None, self.max_input_len],
                                      name="encoder_input")
 
+        self._input_mask = tf.placeholder(
+            tf.float32, shape=[None, self.max_input_len],
+            name="encoder_padding")
+
+        self.sentence_lengths = tf.to_int32(
+            tf.reduce_sum(self._input_mask, 1))
 
     def _create_embedding_matrix(self):
         """Create variables and operations for embedding the input words.
@@ -204,8 +204,7 @@ class SentenceEncoder(Attentive):
         sentences = dataset.get_series(self.data_id)
 
         vectors, paddings = self.vocabulary.sentences_to_tensor(
-            list(sentences), self.max_input_len, train=train,
-            add_technical_symbols=False)
+            list(sentences), self.max_input_len, train_mode=train)
 
         # as sentences_to_tensor returns lists of shape (time, batch),
         # we need to transpose

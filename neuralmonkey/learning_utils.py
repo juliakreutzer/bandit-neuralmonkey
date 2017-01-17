@@ -101,7 +101,7 @@ def training_loop(tf_manager: TensorFlowManager,
         log("Initializing TensorBoard summary writer.")
         tb_writer = tf.train.SummaryWriter(log_directory,
                                            tf_manager.sessions[0].graph)
-        log("TesorBoard writer initialized.")
+        log("TensorBoard writer initialized.")
 
     best_score_epoch = 0
     best_score_batch_no = 0
@@ -257,12 +257,11 @@ def run_on_dataset(tf_manager: TensorFlowManager,
         they are available which are dictionary function -> value.
 
     """
-
-    contains_targets = all(dataset.has_series(runner.output_series)
+    contains_targets = all(dataset.has_series(runner.decoder_data_id)
                            for runner in runners)
 
     all_results = tf_manager.execute(dataset, runners,
-                                     train=contains_targets,
+                                     compute_losses=contains_targets,
                                      batch_size=batch_size)
 
     result_data_raw = {runner.output_series: result.outputs
@@ -413,7 +412,7 @@ def _print_examples(dataset: Dataset,
                      for series_id in dataset.series_ids
                      if series_id not in outputs}
 
-    for i in range(num_examples):
+    for i in range(min(len(dataset), num_examples)):
         log_print(colored("  [{}]".format(i + 1), color='magenta',
                           attrs=['bold']))
 

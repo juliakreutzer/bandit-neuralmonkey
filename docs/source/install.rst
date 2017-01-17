@@ -1,5 +1,6 @@
+.. _instalation:
 
-
+============
 Installation
 ============
 
@@ -17,16 +18,19 @@ Change your directory to ``neuralmonkey`` folder::
 
 	cd neuralmonkey
 
-And now run pip to install all requirements. For CPU version install dependencies
-by this command::
+And now run pip to install all requirements. If you don't want to upgrade your
+packages, for example if you installed Tensorflow from sources and do not want
+to replace it with a downloaded package, consult the requirements file and
+install the dependencies by hand.
+For CPU version install dependencies by this command::
 
 
-	pip3 install -r --requirements.txt
+	pip3 install --upgrade -r --requirements.txt
 
 For GPU version install dependencies ty this command::
 
 
-	pip3 install -r --requirements-gpu.txt
+	pip3 install --upgrade -r --requirements-gpu.txt
 
 If you are using the GPU version, make sure that the ``LD_LIBRARY_PATH``
 environment variable points to ``lib`` and ``lib64`` directories of your CUDA

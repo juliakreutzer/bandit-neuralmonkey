@@ -17,11 +17,11 @@ class Attentive(metaclass=ABCMeta):
         self._attention_type = attention_type
         self._attention_kwargs = kwargs
 
-    def get_attention_object(self, runtime: bool=False):
+    def create_attention_object(self):
         """Attention object that can be used in decoder."""
         # pylint: disable=no-member
-        if hasattr(self, "name") and self.name:
-            name = self.name
+        if hasattr(self, "name") and self.name:  # type: ignore
+            name = self.name  # type: ignore
         else:
             name = str(self)
 
@@ -29,7 +29,6 @@ class Attentive(metaclass=ABCMeta):
             self._attention_tensor,
             scope="attention_{}".format(name),
             input_weights=self._attention_mask,
-            runtime_mode=runtime,
             **self._attention_kwargs) if self._attention_type else None
 
     @abstractproperty

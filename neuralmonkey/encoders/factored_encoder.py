@@ -1,5 +1,4 @@
 import tensorflow as tf
-import numpy as np
 
 from neuralmonkey.checking import assert_shape
 from neuralmonkey.encoders.attentive import Attentive
@@ -195,21 +194,16 @@ class FactoredEncoder(Attentive):
         # this method should be responsible for checking if the factored
         # sentences are of the same length
 
-        res = {}
+        fd = {}
         # we asume that all factors have equal word counts
         # this is removed as res should only contain placeholders as keys
         # res[self.sentence_lengths] = np.array(
         #     [min(self.max_input_len, len(s)) +
         #      2 for s in factors[self.data_ids[0]]])
-
-        batch_size = None
-        for data_id in factors:
-            batch_size = len(factors[data_id])
-
         factor_vectors_and_weights = {
             data_id: vocabulary.sentences_to_tensor(factors[data_id],
                                                     self.max_input_len,
-                                                    train=train)
+                                                    train_mode=train)
             for data_id, vocabulary in zip(self.data_ids, self.vocabularies)}
 
         # check input lengths
@@ -232,17 +226,15 @@ class FactoredEncoder(Attentive):
             inputs = self.factor_inputs[data_id]
             vectors, _ = factor_vectors_and_weights[data_id]
             for words_plc, words_tensor in zip(inputs, vectors):
-                res[words_plc] = words_tensor
+                fd[words_plc] = words_tensor
 
-        res[self.padding_weights[0]] = np.ones(batch_size)
-
-        for plc, padding in zip(self.padding_weights[1:], paddings):
-            res[plc] = padding
+        for plc, padding in zip(self.padding_weights, paddings):
+            fd[plc] = padding
 
         if train:
-            res[self.dropout_placeholder] = self.dropout_keep_prob
+            fd[self.dropout_placeholder] = self.dropout_keep_prob
         else:
-            res[self.dropout_placeholder] = 1.0
-        res[self.is_training] = train
+            fd[self.dropout_placeholder] = 1.0
+        fd[self.is_training] = train
 
-        return res
+        return fd
