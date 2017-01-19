@@ -7,7 +7,7 @@ import tensorflow as tf
 from neuralmonkey.logging import log
 
 
-def linear(inputs, output_size, scope="LinearProjection", bias=True, neg=False):
+def linear(inputs, output_size, scope="LinearProjection", bias=True):
     """Simple linear projection
 
     y = Wx + b
@@ -25,34 +25,12 @@ def linear(inputs, output_size, scope="LinearProjection", bias=True, neg=False):
     Returns:
         A tensor of shape batch x size
     """
-    shapes = inputs.get_shape().as_list()
     with tf.variable_scope(scope):
-        # Now the computation.
-        with tf.variable_scope(scope or "Linear"):
-            matrix = tf.get_variable(
-                "Matrix", [shapes[1], output_size], dtype=tf.float32)
-            matrix_neg = tf.mul(-1., matrix)
-            res = tf.matmul(inputs, matrix)
-            res_neg = tf.matmul(inputs, matrix_neg)
-            if not bias:
-                if not neg:
-                    return res
-                else:
-                    return res_neg
-            bias_term = tf.get_variable(
-                "Bias", [output_size],
-                dtype=tf.float32,
-                initializer=tf.constant_initializer(
-                    0.0, dtype=tf.float32))
-        if not neg:
-            return res + bias_term
-        else:
-            return res_neg + bias_term
-        #return tf.nn.seq2seq.linear(inputs, size, True)
+        return tf.nn.seq2seq.linear(inputs, output_size, bias=bias)
 
 
 def nonlinear(inputs, size, activation=tf.tanh, scope="NonlinearProjection",
-              bias=True, neg=False):
+              bias=True):
     """Linear projection with non-linear activation function
 
     y = activation(Wx + b)
@@ -68,7 +46,7 @@ def nonlinear(inputs, size, activation=tf.tanh, scope="NonlinearProjection",
     """
     with tf.variable_scope(scope) as varscope:
         return activation(linear(inputs, size, scope=varscope,
-                                 bias=bias, neg=neg))
+                                 bias=bias))
 
 
 def maxout(inputs, size, scope="MaxoutProjection"):
