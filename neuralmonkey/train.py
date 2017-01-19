@@ -44,6 +44,7 @@ def create_config() -> Configuration:
     config.add_argument('overwrite_output_dir', bool, required=False,
                         default=False)
 
+
     return config
 
 
@@ -68,6 +69,15 @@ def main() -> None:
     tf.set_random_seed(cfg.args.random_seed)
 
     cfg.build_model()
+
+    if cfg.args.initial_variables is not None:
+        cfg.model.tf_manager.restore(cfg.args.initial_variables)
+        log("Restoring model from {}".format(cfg.args.initial_variables))
+    #initialize_for_running(CONFIG.model.output, CONFIG.model.tf_manager,
+    #                        [CONFIG.args.initial_variables])
+                        #   CONFIG.model.variables)
+    else:
+        log("Building model from scratch")
 
     # pylint: disable=no-member
     if (os.path.isdir(cfg.model.output) and
