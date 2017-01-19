@@ -163,7 +163,6 @@ class Decoder(ModelPart):
                         for e in self.encoders
                         if isinstance(e, Attentive)}
 
-            # TODO need to get self.train_logits?
             self.train_rnn_outputs, _ = self._attention_decoder(
                 embedded_go_symbols,
                 attention_on_input=attention_on_input,
@@ -402,9 +401,11 @@ class Decoder(ModelPart):
 
     def _logit_function(self, state: tf.Tensor, neg: bool=False) -> tf.Tensor:
         state = dropout(state, self.dropout_keep_prob, self.train_mode)
-        # TODO use neg here, was before in linear()
-        # why only linear not non-linear?
-        return tf.matmul(state, self.decoding_w) + self.decoding_b
+        if neg:
+            # for negative sample
+            return tf.matmul(state, -1.*self.decoding_w) + -1.*self.decoding_b
+        else:
+            return tf.matmul(state, self.decoding_w) + self.decoding_b
 
     def _get_rnn_cell(self) -> tf.nn.rnn_cell.RNNCell:
         if self._rnn_cell == 'GRU':
@@ -564,7 +565,6 @@ class Decoder(ModelPart):
         Get all the placeholders of the decoder
         :return:
         """
-        placeholders = [self.rewards, self.go_symbols]
-        placeholders.extend([i for i in self.train_inputs])
-        placeholders.extend([w for w in self.train_padding])
+        placeholders = [self.rewards, self.go_symbols, self.train_mode,
+                        self.train_inputs, self.train_padding]
         return placeholders
