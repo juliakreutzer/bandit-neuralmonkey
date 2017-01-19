@@ -70,7 +70,7 @@ def main() -> None:
 
     cfg.build_model()
 
-    if cfg.args.initial_variables is not None:
+    if len(cfg.args.initial_variables) > 0:
         cfg.model.tf_manager.restore(cfg.args.initial_variables)
         log("Restoring model from {}".format(cfg.args.initial_variables))
     else:
