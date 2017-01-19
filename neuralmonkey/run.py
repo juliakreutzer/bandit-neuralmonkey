@@ -93,16 +93,16 @@ def main() -> None:
     CONFIG.build_model()
     test_datasets.load_file(sys.argv[2])
     test_datasets.build_model()
-    datesets_model = test_datasets.model
+    datasets_model = test_datasets.model
     initialize_for_running(CONFIG.model.output, CONFIG.model.tf_manager,
-                           datesets_model.variables)
+                           datasets_model.variables)
 
     print("")
 
     evaluators = [(e[0], e[0], e[1]) if len(e) == 2 else e
                   for e in CONFIG.model.evaluation]
 
-    for dataset in datesets_model.test_datasets:
+    for dataset in datasets_model.test_datasets:
         execution_results, output_data = run_on_dataset(
             CONFIG.model.tf_manager, CONFIG.model.runners,
             dataset, CONFIG.model.postprocess, write_out=True)
