@@ -56,32 +56,29 @@ def pairwise_objective(decoder, k) -> BanditObjective:
  # FIXME only 1 decoder/objective so far for ALL bandit objectives
 class ExpectedLossTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
-                 learning_rate=1e-4,
                  clip_norm=False, optimizer=None, k=1) -> None:
         objective = expected_loss_objective(decoders[0], k)
         super(ExpectedLossTrainer, self).__init__(
-            objective, l1_weight, l2_weight, learning_rate=learning_rate,
+            objective, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=False)
 
 
 class CrossEntropyTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
-                 learning_rate=1e-4,
                  clip_norm=False, optimizer=None, k=1) -> None:
         objective = cross_entropy_objective(decoders[0], k)
         super(CrossEntropyTrainer, self).__init__(
-            objective, l1_weight, l2_weight, learning_rate=learning_rate,
+            objective, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=False)
 
 
 class PairwiseTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
-                 learning_rate=1e-4,
                  clip_norm=False, optimizer=None, k=1) -> None:
         objective = pairwise_objective(decoders[0], k)
         super(PairwiseTrainer, self).__init__(
-            objective, l1_weight, l2_weight, learning_rate=learning_rate,
+            objective, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=True)
