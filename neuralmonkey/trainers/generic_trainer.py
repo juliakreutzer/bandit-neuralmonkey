@@ -105,8 +105,6 @@ class GenericTrainer(object):
 
     def _get_gradients(self, tensor: tf.Tensor) -> Gradients:
         gradient_list = self.optimizer.compute_gradients(tensor)
-        log("gradient_list")
-        log(gradient_list)
         return gradient_list
 
     def get_executable(
