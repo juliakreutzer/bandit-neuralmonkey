@@ -34,11 +34,10 @@ class GenericBanditTrainer(object):
     # only one objective for now
 
     def __init__(self, objective: BanditObjective,
-                 l1_weight=0.0, l2_weight=0.0, learning_rate=1e-4,
+                 l1_weight=0.0, l2_weight=0.0,
                  clip_norm=False, optimizer=None, pairwise=False) -> None:
 
-        self.optimizer = optimizer or tf.train.AdamOptimizer(
-            learning_rate=learning_rate)
+        self.optimizer = optimizer or tf.train.AdamOptimizer(1e-4)
         self.objective = objective
 
         self.pairwise = pairwise
