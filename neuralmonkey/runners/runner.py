@@ -18,22 +18,26 @@ class GreedyRunner(BaseRunner):
         super(GreedyRunner, self).__init__(output_series, decoder)
         self._postprocess = postprocess
 
-        self.image_summaries = tf.merge_summary(
-            tf.get_collection("summary_val_plots"))
+        val_plot_summaries = tf.get_collection("summary_val_plots")
+        if val_plot_summaries:
+            self.image_summaries = tf.merge_summary(val_plot_summaries)
+        else:
+            self.image_summaries = None
 
-    def get_executable(self, train=False, summaries=True):
-        if train:
-            fecthes = {"train_xent": self._decoder.train_loss,
+    def get_executable(self, compute_losses=False, summaries=True):
+        if compute_losses:
+            fetches = {"train_xent": self._decoder.train_loss,
                        "runtime_xent": self._decoder.runtime_loss}
         else:
-            fecthes = {"train_xent": tf.zeros([]),
+            fetches = {"train_xent": tf.zeros([]),
                        "runtime_xent": tf.zeros([])}
-        fecthes["decoded_logprobs"] = self._decoder.runtime_logprobs
 
-        if summaries:
-            fecthes['image_summaries'] = self.image_summaries
+        fetches["decoded_logprobs"] = self._decoder.runtime_logprobs
 
-        return GreedyRunExecutable(self.all_coders, fecthes,
+        if summaries and self.image_summaries is not None:
+            fetches['image_summaries'] = self.image_summaries
+
+        return GreedyRunExecutable(self.all_coders, fetches,
                                    self._decoder.vocabulary,
                                    self._postprocess)
 
@@ -44,9 +48,9 @@ class GreedyRunner(BaseRunner):
 
 class GreedyRunExecutable(Executable):
 
-    def __init__(self, all_coders, fecthes, vocabulary, postprocess):
+    def __init__(self, all_coders, fetches, vocabulary, postprocess):
         self.all_coders = all_coders
-        self._fetches = fecthes
+        self._fetches = fetches
         self._vocabulary = vocabulary
         self._postprocess = postprocess
 
@@ -83,5 +87,4 @@ class GreedyRunExecutable(Executable):
             losses=[train_loss, runtime_loss],
             scalar_summaries=None,
             histogram_summaries=None,
-            image_summaries=image_summaries
-        )
+            image_summaries=image_summaries)

@@ -1,6 +1,9 @@
-import tensorflow as tf
-import numpy as np
+from typing import List, Optional
 
+import tensorflow as tf
+
+from neuralmonkey.checking import assert_shape
+from neuralmonkey.model.model_part import ModelPart
 from neuralmonkey.encoders.attentive import Attentive
 from neuralmonkey.logging import log
 from neuralmonkey.nn.bidirectional_rnn_layer import BidirectionalRNNLayer
@@ -14,13 +17,20 @@ from neuralmonkey.vocabulary import Vocabulary
 # pylint: disable=too-many-instance-attributes
 
 
-class FactoredEncoder(Attentive):
-    """Implementation of a generic encoder that processes an arbitrary
-    number of input sequences.
-    """
+class FactoredEncoder(ModelPart, Attentive):
+    """Generic encoder processessig an arbitrary number of input sequences."""
 
-    def __init__(self, max_input_len, vocabularies, data_ids, embedding_sizes,
-                 rnn_size, **kwargs):
+    # pylint: disable=too-many-arguments
+    def __init__(self,
+                 name: str,
+                 max_input_len: int,
+                 vocabularies: List[Vocabulary],
+                 data_ids: List[str],
+                 embedding_sizes: List[int],
+                 rnn_size: int,
+                 save_checkpoint: Optional[str]=None,
+                 load_checkpoint: Optional[str]=None,
+                 **kwargs) -> None:
         """Construct a new instance of the factored encoder.
 
         Args:
@@ -48,9 +58,8 @@ class FactoredEncoder(Attentive):
             dropout_keep_prob: 1 - Dropout probability [1]
         """
         attention_type = kwargs.get("attention_type", None)
-        attention_fertility = kwargs.get("attention_fertility", 3)
-        super().__init__(
-            attention_type, attention_fertility=attention_fertility)
+        ModelPart.__init__(self, name, save_checkpoint, load_checkpoint)
+        Attentive.__init__(attention_type, **kwargs)
         for vocabulary in vocabularies:
             assert_type(self, 'vocabulary', vocabulary, Vocabulary)
 
@@ -61,7 +70,6 @@ class FactoredEncoder(Attentive):
         self.max_input_len = max_input_len
         self.rnn_size = rnn_size
 
-        self.name = kwargs.get("name", "sentence_encoder")
         self.dropout_keep_prob = kwargs.get("dropout_keep_prob", 1)
 
         self.use_noisy_activations = kwargs.get("use_noisy_activations", False)
@@ -74,6 +82,7 @@ class FactoredEncoder(Attentive):
             # Attention mechanism
 
             log("Encoder graph constructed.")
+    # pylint: enable=too-many-arguments
 
     @property
     def _attention_mask(self):
@@ -154,6 +163,7 @@ class FactoredEncoder(Attentive):
                 for i in embedded_inputs]
 
             # Resulting shape is batch x embedding_size
+            assert_shape(dropped_embedded_inputs, [None, embedding_size])
             factors.append(dropped_embedded_inputs)
 
             # Add inputs and weights to self to be able to feed them
@@ -167,6 +177,8 @@ class FactoredEncoder(Attentive):
         # tuples indexed by the time step
         concatenated_factors = [tf.concat(1, related_factors)
                                 for related_factors in zip(*factors)]
+        assert_shape(concatenated_factors[0],
+                     [None, sum(self.embedding_sizes)])
         forward_gru, backward_gru = self._get_birnn_cells()
 
         bidi_layer = BidirectionalRNNLayer(forward_gru, backward_gru,
@@ -191,21 +203,16 @@ class FactoredEncoder(Attentive):
         # this method should be responsible for checking if the factored
         # sentences are of the same length
 
-        res = {}
+        fd = {}
         # we asume that all factors have equal word counts
         # this is removed as res should only contain placeholders as keys
         # res[self.sentence_lengths] = np.array(
         #     [min(self.max_input_len, len(s)) +
         #      2 for s in factors[self.data_ids[0]]])
-
-        batch_size = None
-        for data_id in factors:
-            batch_size = len(factors[data_id])
-
         factor_vectors_and_weights = {
             data_id: vocabulary.sentences_to_tensor(factors[data_id],
                                                     self.max_input_len,
-                                                    train=train)
+                                                    train_mode=train)
             for data_id, vocabulary in zip(self.data_ids, self.vocabularies)}
 
         # check input lengths
@@ -228,17 +235,15 @@ class FactoredEncoder(Attentive):
             inputs = self.factor_inputs[data_id]
             vectors, _ = factor_vectors_and_weights[data_id]
             for words_plc, words_tensor in zip(inputs, vectors):
-                res[words_plc] = words_tensor
+                fd[words_plc] = words_tensor
 
-        res[self.padding_weights[0]] = np.ones(batch_size)
-
-        for plc, padding in zip(self.padding_weights[1:], paddings):
-            res[plc] = padding
+        for plc, padding in zip(self.padding_weights, paddings):
+            fd[plc] = padding
 
         if train:
-            res[self.dropout_placeholder] = self.dropout_keep_prob
+            fd[self.dropout_placeholder] = self.dropout_keep_prob
         else:
-            res[self.dropout_placeholder] = 1.0
-        res[self.is_training] = train
+            fd[self.dropout_placeholder] = 1.0
+        fd[self.is_training] = train
 
-        return res
+        return fd

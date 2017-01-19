@@ -1,13 +1,15 @@
-from typing import Generator, List
+from typing import Any, Callable, Generator, List
 # tests: lint, mypy
 
 
-def preprocess_char_based(sequences: List[List[str]]) -> List[List[str]]:
-    return [list(" ".join(sequence)) for sequence in sequences]
+def preprocess_char_based(sentence: List[str]) -> List[str]:
+    return list(" ".join(sentence))
 
 
-def postprocess_char_based(sequences: List[List[str]]) -> List[List[str]]:
-    return [["".join(sqc)] for sqc in sequences]
+def postprocess_char_based(sentence: List[str]) -> List[str]:
+    joined = "".join(sentence)
+    tokenized = joined.split(" ")
+    return tokenized
 
 
 def untruecase(
@@ -17,3 +19,14 @@ def untruecase(
             yield [sentence[0].capitalize()] + sentence[1:]
         else:
             yield []
+
+
+def pipeline(processors: List[Callable]) -> Callable:
+    """Concatenate processors."""
+
+    def process(data: Any) -> Any:
+        for processor in processors:
+            data = processor(data)
+        return data
+
+    return process

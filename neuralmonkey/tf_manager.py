@@ -6,15 +6,18 @@ execution in existing sessions.
 """
 
 # pylint: disable=unused-import
-from typing import Any, List, Union
+from typing import Any, List, Union, Dict, Set
+# pylint: enable=unused-import
 
-import numpy as np
 import tensorflow as tf
-from neuralmonkey.dataset import Dataset
 from neuralmonkey.logging import log
+from neuralmonkey.dataset import Dataset
 
-from neuralmonkey.runners.base_runner import (Executable, ExecutionResult, BanditExecutable,
-                                              reduce_execution_results, BanditExecutionResult)
+from neuralmonkey.runners.base_runner import (ExecutionResult,
+                                              BanditExecutionResult,
+                                              Executable,
+                                              BanditExecutable,
+                                              reduce_execution_results)
 
 # tests: pylint,mypy
 
@@ -26,8 +29,10 @@ class TensorFlowManager(object):
         sessions: List of active Tensorflow sessions.
     """
 
-    def __init__(self, num_sessions, num_threads, variable_files=None,
-                 gpu_allow_growth=True, per_process_gpu_memory_fraction=1.0):
+    def __init__(self, num_sessions, num_threads, save_n_best=1,
+                 variable_files=None, gpu_allow_growth=True,
+                 per_process_gpu_memory_fraction=1.0,
+                 report_gpu_memory_consumption=False):
         """Initialize a TensorflowManager.
 
         At this moment the graph must already exist. This method initializes
@@ -38,6 +43,10 @@ class TensorFlowManager(object):
             num_sessions: Number of sessions to be initialized.
             num_threads: Number of threads sessions will run in.
             variable_files: List of variable files.
+            gpu_allow_growth: TF to allocate incrementally, not all at once.
+            per_process_gpu_memory_fraction: Limit TF memory use.
+            report_gpu_memory_consumption: Report overall GPU memory at every
+                logging
         """
 
         session_cfg = tf.ConfigProto()
@@ -48,13 +57,15 @@ class TensorFlowManager(object):
         session_cfg.gpu_options.allow_growth = gpu_allow_growth
         session_cfg.gpu_options.per_process_gpu_memory_fraction = \
             per_process_gpu_memory_fraction
+        self.report_gpu_memory_consumption = report_gpu_memory_consumption
 
+        self.saver_max_to_keep = save_n_best
         self.sessions = [tf.Session(config=session_cfg)
                          for _ in range(num_sessions)]
         init_op = tf.initialize_all_variables()
         for sess in self.sessions:
             sess.run(init_op)
-        self.saver = tf.train.Saver()
+        self.saver = tf.train.Saver(max_to_keep=self.saver_max_to_keep)
 
         if variable_files:
             if len(variable_files) != num_sessions:
@@ -68,6 +79,7 @@ class TensorFlowManager(object):
                 dataset: Dataset,
                 execution_scripts,
                 train=False,
+                compute_losses=True,
                 summaries=True,
                 batch_size=None) -> List[ExecutionResult]:
         if batch_size is None:
@@ -77,7 +89,8 @@ class TensorFlowManager(object):
         batch_results = [
             [] for _ in execution_scripts]  # type: List[List[ExecutionResult]]
         for batch in batched_dataset:
-            executables = [s.get_executable(train=train, summaries=summaries)
+            executables = [s.get_executable(compute_losses=compute_losses,
+                                            summaries=summaries)
                            for s in execution_scripts]
             while not all(ex.result is not None for ex in executables):
                 all_feedables = set()   # type: Set[Any]
@@ -243,6 +256,14 @@ class TensorFlowManager(object):
         for sess, file_name in zip(self.sessions, variable_files):
             log("Loading variables from {}".format(file_name))
             self.saver.restore(sess, file_name)
+
+    def initialize_model_parts(self, runners) -> None:
+        """Initialize model parts variables from their checkpoints."""
+
+        all_coders = set.union(*[rnr.all_coders for rnr in runners])
+        for coder in all_coders:
+            for session in self.sessions:
+                coder.load(session)
 
 
 def _feed_dicts(dataset, coders, train=False):

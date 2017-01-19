@@ -1,5 +1,6 @@
 #!/bin/bash
 
-set -e
+set -Ex
+trap 'echo -e "\033[1;31mMarkdownlint spotted errors!\033[0m"' ERR
 
-mdl *.md $(find neuralmonkey -name '*.md') $(find tests -name '*.md') $(find examples -name '*.md')
+mdl *.md scripts examples tests docs neuralmonkey

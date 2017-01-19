@@ -133,6 +133,7 @@ def _score_expanded_samples(k: int,
                           expanded: List[ExpandedSampleBatch],
                           scoring_function: ScoringFunction) -> \
         Tuple[List[np.ndarray], List[np.ndarray]]:
+    # TODO merge with score expanded beam
     """Score expanded samples.
 
     After all hypotheses have their possible continuations, we need to score
@@ -204,27 +205,8 @@ def _try_append(first, second):
         return np.append(first, second)
 
 
-def likelihood_beam_score(decoded, logprobs):
-    """Score the beam by normalized probability."""
-
-    mask = []
-    for hypothesis in decoded:
-        before_end = True
-        hyp_mask = []
-        for index in hypothesis:
-            hyp_mask.append(float(before_end))
-            before_end &= (index != END_TOKEN_INDEX)
-        mask.append(hyp_mask)
-
-    mask_matrix = np.array(mask)
-    masked_logprobs = mask_matrix * logprobs
-    # pylint: disable=no-member
-    avg_logprobs = masked_logprobs.sum(
-        axis=1) - np.log(mask_matrix.sum(axis=1))
-    return avg_logprobs
-
-def likelihood_sample_score(decoded, logprobs):
-    """Score the sample set by normalized probability."""
+def likelihood_score(decoded, logprobs):
+    """Score the beam or sample by normalized probability."""
 
     mask = []
     for hypothesis in decoded:
@@ -277,6 +259,123 @@ def n_best(n: int,
 
     return beam_batches
 
+
+class RuntimeRnnSampler(BaseRunner):
+    """Instead of beam search, sample hypotheses step by step"""
+
+    def __init__(self, output_series, decoder,
+                 sample_size=1, sample_scoring_f=likelihood_score):
+        super(RuntimeRnnSampler, self).__init__(output_series, decoder)
+
+        self._initial_fetches = [decoder.runtime_rnn_states[0]]
+        self._initial_fetches += [e.encoded for e in self.all_coders
+                                  if hasattr(e, 'encoded')]
+        self._sample_size = sample_size
+        self._sample_scoring_f = sample_scoring_f
+
+    def get_executable(self, compute_losses=False, summaries=True):
+
+        return RuntimeRnnSamplerExecutable(self.all_coders, self._decoder,
+                                           self._initial_fetches,
+                                           self._decoder.vocabulary,
+                                           sample_size=self._sample_size,
+                                           sample_scoring_f=self._sample_scoring_f,
+                                           compute_losses=compute_losses)
+
+    @property
+    def loss_names(self) -> List[str]:
+        return ["runtime_xent"]
+
+
+class RuntimeRnnSamplerExecutable(Executable):
+    """Run and ensemble the RNN decoder step by step."""
+    def __init__(self, all_coders, decoder, initial_fetches, vocabulary,
+                 sample_scoring_f, sample_size=1,
+                 compute_losses=True):
+        self._all_coders = all_coders
+        self._decoder = decoder
+        self._vocabulary = vocabulary
+        self._initial_fetches = initial_fetches
+        self._compute_losses = compute_losses
+        self._sample_size = sample_size
+        self._sample_scoring_f = sample_scoring_f
+
+        self._to_expand = [None]  # type: List[Option[SampleBatch]]
+        self._current_sample_batch = None
+        self._expanded = []  # type: List[ExpandedSampleBatch]
+        self._time_step = 0
+
+        self.result = None  # type: Option[ExecutionResult]
+
+    def next_to_execute(self) -> NextExecute:
+        """Get the feedables and tensors to run.
+
+        It takes a sample batch that should be expanded the next and preprare an
+        additional feed_dict based on the hypotheses history.
+        """
+
+        if self.result is not None:
+            raise Exception(
+                "Nothing to execute, if there is already a result.")
+
+        to_run = {'logprobs': self._decoder.train_logprobs[self._time_step]}
+
+        self._current_sample_batch = self._to_expand.pop()
+
+        if self._current_sample_batch is not None:
+            batch_size, output_len = self._current_sample_batch.decoded.shape
+            fed_value = np.zeros([self._decoder.max_output_len, batch_size])
+            fed_value[:output_len, :] = self._current_sample_batch.decoded.T
+
+            additional_feed_dict = {self._decoder.train_inputs: fed_value}
+        else:
+            additional_feed_dict = {}
+        # at the end, we should compute loss
+        if self._time_step == self._decoder.max_output_len - 1:
+            if self._compute_losses:
+                to_run["xent"] = self._decoder.train_loss
+            else:
+                to_run["xent"] = tf.zeros([])
+
+        return self._all_coders, to_run, additional_feed_dict
+
+    def collect_results(self, results: List[Dict]) -> None:
+        """Process what the TF session returned.
+
+        Only a single time step is always processed at once. First,
+        distributions from all sessions are aggregated.
+
+        """
+
+        summed_logprobs = -np.inf
+        for sess_result in results:
+            summed_logprobs = np.logaddexp(summed_logprobs,
+                                           sess_result["logprobs"])
+        avg_logprobs = summed_logprobs - np.log(len(results))
+
+        expanded_batch = ExpandedSampleBatch(self._current_sample_batch,
+                                           avg_logprobs)
+        self._expanded.append(expanded_batch)
+
+        if not self._to_expand:
+            self._time_step += 1
+            self._to_expand = sample(
+                self._sample_size, self._expanded, self._sample_scoring_f)
+            self._expanded = []
+
+        if self._time_step == self._decoder.max_output_len:
+            sampled_batch = self._to_expand[-1].decoded.T  # TODO should be of size k
+            decoded_tokens = self._vocabulary.vectors_to_sentences(sampled_batch)
+            loss = np.mean([res["xent"] for res in results])
+            self.result = ExecutionResult(
+                outputs=decoded_tokens,
+                losses=[loss],
+                scalar_summaries=None,
+                histogram_summaries=None,
+                image_summaries=None
+            )
+
+
 def sample(k: int,
            expanded: List[ExpandedSampleBatch],
            scoring_function) -> List[SampleBatch]:
@@ -314,125 +413,12 @@ def sample(k: int,
     return sample_batches
 
 
-class RuntimeRnnSampler(BaseRunner):
-    """Instead of beam search, sample hypotheses step by step"""
-
-    def __init__(self, output_series, decoder,
-                 sample_size=1, sample_scoring_f=likelihood_sample_score):
-        super(RuntimeRnnSampler, self).__init__(output_series, decoder)
-
-        self._initial_fetches = [decoder.runtime_rnn_states[0]]
-        self._initial_fetches += [e.encoded for e in self.all_coders
-                                  if hasattr(e, 'encoded')]
-        self._sample_size = sample_size
-        self._sample_scoring_f = sample_scoring_f
-
-    def get_executable(self, train=False, summaries=True):
-
-        return RuntimeRnnSamplerExecutable(self.all_coders, self._decoder,
-                                    self._initial_fetches,
-                                    self._decoder.vocabulary,
-                                    sample_size=self._sample_size,
-                                    sample_scoring_f=self._sample_scoring_f,
-                                    compute_loss=train)
-
-    @property
-    def loss_names(self) -> List[str]:
-        return ["runtime_xent"]
-
-class RuntimeRnnSamplerExecutable(Executable):
-    """Run and ensemble the RNN decoder step by step."""
-    def __init__(self, all_coders, decoder, initial_fetches, vocabulary,
-                 sample_scoring_f, sample_size=1,
-                 compute_loss=True):
-        self._all_coders = all_coders
-        self._decoder = decoder
-        self._vocabulary = vocabulary
-        self._initial_fetches = initial_fetches
-        self._compute_loss = compute_loss
-        self._sample_size = sample_size
-        self._sample_scoring_f = sample_scoring_f
-
-        self._to_expand = [None]  # type: List[Option[SampleBatch]]
-        self._current_sample_batch = None
-        self._expanded = []  # type: List[ExpandedSampleBatch]
-        self._time_step = 0
-
-        self.result = None  # type: Option[ExecutionResult]
-
-    def next_to_execute(self) -> NextExecute:
-        """Get the feedables and tensors to run.
-
-        It takes a sample batch that should be expanded the next and preprare an
-        additional feed_dict based on the hypotheses history.
-        """
-
-        if self.result is not None:
-            raise Exception(
-                "Nothing to execute, if there is already a result.")
-
-        to_run = {'logprobs': self._decoder.train_logprobs[self._time_step]}
-
-        self._current_sample_batch = self._to_expand.pop()
-
-        if self._current_sample_batch is not None:
-            additional_feed_dict = {t: index for t, index in zip(
-                self._decoder.train_inputs[1:],
-                self._current_sample_batch.decoded.T)}
-        else:
-            additional_feed_dict = {}
-
-        # at the end, we should compute loss
-        if self._time_step == self._decoder.max_output - 1:
-            if self._compute_loss:
-                to_run["xent"] = self._decoder.train_loss
-            else:
-                to_run["xent"] = tf.zeros([])
-
-        return self._all_coders, to_run, additional_feed_dict
-
-    def collect_results(self, results: List[Dict]) -> None:
-        """Process what the TF session returned.
-
-        Only a single time step is always processed at once. First,
-        distributions from all sessions are aggregated.
-
-        """
-
-        summed_logprobs = -np.inf
-        for sess_result in results:
-            summed_logprobs = np.logaddexp(summed_logprobs,
-                                           sess_result["logprobs"])
-        avg_logprobs = summed_logprobs - np.log(len(results))
-
-        expanded_batch = ExpandedSampleBatch(self._current_sample_batch,
-                                           avg_logprobs)
-        self._expanded.append(expanded_batch)
-
-        if not self._to_expand:
-            self._time_step += 1
-            self._to_expand = sample(
-                self._sample_size, self._expanded, self._sample_scoring_f)
-            self._expanded = []
-
-        if self._time_step == self._decoder.max_output:
-            sampled_batch = self._to_expand[-1].decoded.T  # TODO should be of size k
-            decoded_tokens = self._vocabulary.vectors_to_sentences(sampled_batch)
-            loss = np.mean([res["xent"] for res in results])
-            self.result = ExecutionResult(
-                outputs=decoded_tokens,
-                losses=[loss],
-                scalar_summaries=None,
-                histogram_summaries=None,
-                image_summaries=None
-            )
-
 class RuntimeRnnRunner(BaseRunner):
     """Prepare running the RNN decoder step by step."""
 
     def __init__(self,
                  output_series: str, decoder,
-                 beam_size: int=1, beam_scoring_f=likelihood_beam_score,
+                 beam_size: int=1, beam_scoring_f=likelihood_score,
                  postprocess: Callable[[List[str]], List[str]]=None) -> None:
         super(RuntimeRnnRunner, self).__init__(output_series, decoder)
 
@@ -443,14 +429,14 @@ class RuntimeRnnRunner(BaseRunner):
         self._beam_scoring_f = beam_scoring_f
         self._postprocess = postprocess
 
-    def get_executable(self, train=False, summaries=True):
+    def get_executable(self, compute_losses=False, summaries=True):
 
         return RuntimeRnnExecutable(self.all_coders, self._decoder,
                                     self._initial_fetches,
                                     self._decoder.vocabulary,
                                     beam_size=self._beam_size,
                                     beam_scoring_f=self._beam_scoring_f,
-                                    compute_loss=train,
+                                    compute_loss=compute_losses,
                                     postprocess=self._postprocess)
 
     @property
@@ -498,14 +484,16 @@ class RuntimeRnnExecutable(Executable):
         self._current_beam_batch = self._to_expand.pop()
 
         if self._current_beam_batch is not None:
-            additional_feed_dict = {t: index for t, index in zip(
-                self._decoder.train_inputs[1:],
-                self._current_beam_batch.decoded.T)}
+            batch_size, output_len = self._current_beam_batch.decoded.shape
+            fed_value = np.zeros([self._decoder.max_output_len, batch_size])
+            fed_value[:output_len, :] = self._current_beam_batch.decoded.T
+
+            additional_feed_dict = {self._decoder.train_inputs: fed_value}
         else:
             additional_feed_dict = {}
 
         # at the end, we should compute loss
-        if self._time_step == self._decoder.max_output - 1:
+        if self._time_step == self._decoder.max_output_len - 1:
             if self._compute_loss:
                 to_run["xent"] = self._decoder.train_loss
             else:
@@ -537,7 +525,7 @@ class RuntimeRnnExecutable(Executable):
                 self._beam_size, self._expanded, self._beam_scoring_f)
             self._expanded = []
 
-        if self._time_step == self._decoder.max_output:
+        if self._time_step == self._decoder.max_output_len:
             top_batch = self._to_expand[-1].decoded.T
             decoded_tokens = self._vocabulary.vectors_to_sentences(top_batch)
 

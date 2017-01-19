@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, Tuple
 import tensorflow as tf
 
 from neuralmonkey.encoders.attentive import Attentive
+from neuralmonkey.model.model_part import ModelPart, FeedDict
 from neuralmonkey.logging import log
 from neuralmonkey.nn.noisy_gru_cell import NoisyGRUCell
 from neuralmonkey.nn.ortho_gru_cell import OrthoGRUCell
@@ -13,13 +14,12 @@ from neuralmonkey.vocabulary import Vocabulary
 
 # pylint: disable=invalid-name
 AttType = Any  # Type[] or union of types do not work here
-FeedDict = Dict[tf.Tensor, Any]
 RNNCellTuple = Tuple[tf.nn.rnn_cell.RNNCell, tf.nn.rnn_cell.RNNCell]
 # pylint: enable=invalid-name
 
 
 # pylint: disable=too-many-instance-attributes
-class SentenceEncoder(Attentive):
+class SentenceEncoder(ModelPart, Attentive):
     """A class that manages parts of the computation graph that are
     used for encoding of input sentences. It uses a bidirectional RNN.
 
@@ -29,9 +29,9 @@ class SentenceEncoder(Attentive):
 
     # pylint: disable=too-many-arguments,too-many-locals
     def __init__(self,
+                 name: str,
                  vocabulary: Vocabulary,
                  data_id: str,
-                 name: str,
                  max_input_len: int,
                  embedding_size: int,
                  rnn_size: int,
@@ -39,7 +39,9 @@ class SentenceEncoder(Attentive):
                  attention_type: Optional[AttType]=None,
                  attention_fertility: int=3,
                  use_noisy_activations: bool=False,
-                 parent_encoder: Optional["SentenceEncoder"]=None) -> None:
+                 parent_encoder: Optional["SentenceEncoder"]=None,
+                 save_checkpoint: Optional[str]=None,
+                 load_checkpoint: Optional[str]=None) -> None:
         """Createes a new instance of the sentence encoder
 
         Arguments:
@@ -62,12 +64,12 @@ class SentenceEncoder(Attentive):
             attention_fertility: Fertility parameter used with
                 CoverageAttention (default 3).
         """
-        super().__init__(
-            attention_type, attention_fertility=attention_fertility)
+        ModelPart.__init__(self, name, save_checkpoint, load_checkpoint)
+        Attentive.__init__(
+            self, attention_type, attention_fertility=attention_fertility)
 
         self.vocabulary = vocabulary
         self.data_id = data_id
-        self.name = name
 
         self.max_input_len = max_input_len
         self.embedding_size = embedding_size
@@ -76,29 +78,25 @@ class SentenceEncoder(Attentive):
         self.use_noisy_activations = use_noisy_activations
         self.parent_encoder = parent_encoder
 
-        self._input_mask = tf.placeholder(
-            tf.float32, shape=[None, self.max_input_len],
-            name="encoder_padding")
-
-        self.sentence_lengths = tf.to_int32(
-            tf.reduce_sum(self._input_mask, 1))
-
         log("Initializing sentence encoder, name: '{}'"
             .format(self.name))
 
         with tf.variable_scope(self.name):
             self._create_input_placeholders()
-            self._create_embedding_matrix()
+            with tf.variable_scope('input_projection'):
+                self._create_embedding_matrix()
+                embedded_inputs = self._embed(self.inputs)  # type: tf.Tensor
 
-            embedded_inputs = self._embed(self.inputs)  # type: tf.Tensor
             fw_cell, bw_cell = self.rnn_cells()  # type: RNNCellTuple
-
             self.outputs_bidi_tup, encoded_tup = tf.nn.bidirectional_dynamic_rnn(
                 fw_cell, bw_cell, embedded_inputs, self.sentence_lengths,
                 dtype=tf.float32)
 
-            self.__attention_tensor = tf.concat(2, self.outputs_bidi_tup)
-            self.__attention_tensor = self._dropout(self.__attention_tensor)
+            self.hidden_states = tf.concat(2, self.outputs_bidi_tup)
+
+            with tf.variable_scope('attention_tensor'):
+                self.__attention_tensor = self._dropout(
+                    self.hidden_states)
 
             self.encoded = tf.concat(1, encoded_tup)
 
@@ -117,8 +115,11 @@ class SentenceEncoder(Attentive):
         return len(self.vocabulary)
 
     def _get_placeholders(self):
+        """
+        Get all the placeholders of the encoder
+        :return:
+        """
         placeholders = [self.train_mode, self.inputs, self._input_mask]
-        #log("placeholders from encoder: {}".format(placeholders))
         return placeholders
 
     def _create_input_placeholders(self):
@@ -130,6 +131,12 @@ class SentenceEncoder(Attentive):
                                      shape=[None, self.max_input_len],
                                      name="encoder_input")
 
+        self._input_mask = tf.placeholder(
+            tf.float32, shape=[None, self.max_input_len],
+            name="encoder_padding")
+
+        self.sentence_lengths = tf.to_int32(
+            tf.reduce_sum(self._input_mask, 1))
 
     def _create_embedding_matrix(self):
         """Create variables and operations for embedding the input words.
@@ -207,8 +214,7 @@ class SentenceEncoder(Attentive):
         sentences = dataset.get_series(self.data_id)
 
         vectors, paddings = self.vocabulary.sentences_to_tensor(
-            list(sentences), self.max_input_len, train=train,
-            add_technical_symbols=False)
+            list(sentences), self.max_input_len, train_mode=train)
 
         # as sentences_to_tensor returns lists of shape (time, batch),
         # we need to transpose

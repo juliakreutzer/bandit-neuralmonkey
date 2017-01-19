@@ -13,6 +13,8 @@ from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
 from neuralmonkey.evaluators.bleu import BLEUEvaluator
 
+from neuralmonkey.tf_utils import gpu_memusage
+
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
 EvalConfiguration = List[Union[Tuple[str, Any], Tuple[str, str, Any]]]
@@ -30,7 +32,6 @@ def training_loop(tf_manager: TensorFlowManager,
                   evaluators: EvalConfiguration,
                   runners: List[BaseRunner],
                   test_datasets: Optional[List[Dataset]]=None,
-                  save_n_best_vars: int=1,
                   link_best_vars="/tmp/variables.data.best",
                   vars_prefix="/tmp/variables.data",
                   logging_period: int=20,
@@ -61,6 +62,14 @@ def training_loop(tf_manager: TensorFlowManager,
             means the generated and dataset series have the same name.
     """
 
+    if validation_period < logging_period:
+        raise AssertionError(
+            "Logging period can't smaller than validation period.")
+
+    # TODO DOCUMENT_THIS
+    if runners_batch_size is None:
+        runners_batch_size = batch_size
+
     evaluators = [(e[0], e[0], e[1]) if len(e) == 2 else e
                   for e in evaluators]
 
@@ -68,6 +77,7 @@ def training_loop(tf_manager: TensorFlowManager,
     step = 0
     seen_instances = 0
 
+    save_n_best_vars = tf_manager.saver_max_to_keep
     if save_n_best_vars < 1:
         raise Exception('save_n_best_vars must be greater than zero')
 
@@ -84,6 +94,7 @@ def training_loop(tf_manager: TensorFlowManager,
         saved_scores = [-np.inf for _ in range(save_n_best_vars)]
         best_score = -np.inf
 
+    tf_manager.initialize_model_parts(runners + [trainer])
     tf_manager.save(variables_files[0])
 
     if os.path.islink(link_best_vars):
@@ -95,16 +106,16 @@ def training_loop(tf_manager: TensorFlowManager,
         log("Initializing TensorBoard summary writer.")
         tb_writer = tf.train.SummaryWriter(log_directory,
                                            tf_manager.sessions[0].graph)
-        log("TesorBoard writer initialized.")
+        log("TensorBoard writer initialized.")
 
     best_score_epoch = 0
     best_score_batch_no = 0
 
     log("Starting training")
     try:
-        for i in range(epochs):
+        for epoch_n in range(1, epochs + 1):
             log_print("")
-            log("Epoch {} starts".format(i + 1), color='red')
+            log("Epoch {} starts".format(epoch_n), color='red')
 
             train_dataset.shuffle()
             train_batched_datasets = train_dataset.batch_dataset(batch_size)
@@ -124,10 +135,11 @@ def training_loop(tf_manager: TensorFlowManager,
                         evaluators, batch_dataset, runners,
                         train_results, train_outputs)
 
-                    _log_continuous_evaluation(tb_writer, main_metric,
+                    _log_continuous_evaluation(tb_writer, tf_manager,
+                                               main_metric,
                                                train_evaluation,
-                                               seen_instances,
-                                               trainer_result,
+                                               seen_instances, epoch_n,
+                                               epochs, trainer_result,
                                                train=True)
                 else:
                     tf_manager.execute(batch_dataset, [trainer],
@@ -158,7 +170,7 @@ def training_loop(tf_manager: TensorFlowManager,
 
                     if is_better(this_score, best_score, minimize_metric):
                         best_score = this_score
-                        best_score_epoch = i + 1
+                        best_score_epoch = epoch_n
                         best_score_batch_no = batch_n
 
                     worst_index = argworst(saved_scores, minimize_metric)
@@ -181,10 +193,13 @@ def training_loop(tf_manager: TensorFlowManager,
                             saved_scores))
 
                     log("Validation (epoch {}, batch number {}):"
-                        .format(i + 1, batch_n), color='blue')
+                        .format(epoch_n, batch_n), color='blue')
 
-                    _log_continuous_evaluation(tb_writer, main_metric,
-                                               val_evaluation, seen_instances,
+                    _log_continuous_evaluation(tb_writer, tf_manager,
+                                               main_metric,
+                                               val_evaluation,
+                                               seen_instances, epoch_n,
+                                               epochs,
                                                val_results, train=False)
 
                     if this_score == best_score:
@@ -559,11 +574,10 @@ def run_on_dataset(tf_manager: TensorFlowManager,
         they are available which are dictionary function -> value.
 
     """
-
-    contains_targets = all(dataset.has_series(runner.output_series)
+    contains_targets = all(dataset.has_series(runner.decoder_data_id)
                            for runner in runners)
     all_results = tf_manager.execute(dataset, runners,
-                                     train=contains_targets,
+                                     compute_losses=contains_targets,
                                      batch_size=batch_size)
 
     result_data_raw = {runner.output_series: result.outputs
@@ -629,16 +643,28 @@ def evaluation(evaluators, dataset, runners, execution_results, result_data):
 
 
 def _log_continuous_evaluation(tb_writer: tf.train.SummaryWriter,
+                               tf_manager: TensorFlowManager,
                                main_metric: str,
                                eval_result: Evaluation,
                                seen_instances: int,
+                               epoch: int,
+                               max_epochs: int,
                                execution_results: List[ExecutionResult],
                                train: bool=False) -> None:
     """Log the evaluation results and the TensorBoard summaries."""
 
     color, prefix = ("yellow", "train") if train else ("blue", "val")
 
+    if tf_manager.report_gpu_memory_consumption:
+        meminfostr = "  "+gpu_memusage()
+    else:
+        meminfostr = ""
+
     eval_string = _format_evaluation_line(eval_result, main_metric)
+    eval_string = "Epoch {}/{}  Instances {}  {}".format(epoch, max_epochs,
+                                                         seen_instances,
+                                                         eval_string)
+    eval_string = eval_string+meminfostr
     log(eval_string, color=color)
 
     if tb_writer:
@@ -709,7 +735,7 @@ def _print_examples(dataset: Dataset,
                      for series_id in dataset.series_ids
                      if series_id not in outputs}
 
-    for i in range(num_examples):
+    for i in range(min(len(dataset), num_examples)):
         log_print(colored("  [{}]".format(i + 1), color='magenta',
                           attrs=['bold']))
 
