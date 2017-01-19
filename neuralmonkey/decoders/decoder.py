@@ -1,12 +1,14 @@
 # tests: lint
 
-from typing import List, Callable, Optional, Union, Any, Tuple, Dict
+from typing import cast, Iterable, List, Callable, Optional, Union, Any, Tuple, Dict
 import math
 
 import tensorflow as tf
 import numpy as np
 
+from neuralmonkey.dataset import Dataset
 from neuralmonkey.vocabulary import Vocabulary, START_TOKEN
+from neuralmonkey.model.model_part import ModelPart, FeedDict
 from neuralmonkey.logging import log
 from neuralmonkey.nn.utils import dropout
 from neuralmonkey.encoders.attentive import Attentive
@@ -19,7 +21,7 @@ from neuralmonkey.decoders.output_projection import no_deep_output
 # pylint: disable=too-many-instance-attributes,too-few-public-methods
 # Big decoder cannot be simpler. Not sure if refactoring
 # it into smaller units would be helpful
-class Decoder(object):
+class Decoder(ModelPart):
     """A class that manages parts of the computation graph that are
     used for the decoding.
     """
@@ -42,8 +44,10 @@ class Decoder(object):
                  use_attention: bool=False,
                  embeddings_encoder: Optional[Any]=None,
                  rnn_cell: str='GRU',
-                 attention_on_input: bool=True) -> None:
-        """Creates a refactored version of monster decoder.
+                 attention_on_input: bool=True,
+                 save_checkpoint: Optional[str]=None,
+                 load_checkpoint: Optional[str]=None) -> None:
+        """Create a refactored version of monster decoder.
 
         Arguments:
             encoders: Input encoders of the decoder
@@ -68,12 +72,12 @@ class Decoder(object):
             attention_on_input: Flag whether attention from previous decoding
                 step should be combined with the input in the next step.
         """
+        ModelPart.__init__(self, name, save_checkpoint, load_checkpoint)
         log("Initializing decoder, name: '{}'".format(name))
 
         self.encoders = encoders
         self.vocabulary = vocabulary
         self.data_id = data_id
-        self.name = name
         self.max_output_len = max_output_len
         self.dropout_keep_prob = dropout_keep_prob
         self.embedding_size = embedding_size
@@ -136,99 +140,99 @@ class Decoder(object):
                     initializer=tf.constant_initializer(
                         - math.log(len(self.vocabulary))))
 
-        # last train input is unused in decoding functions
-        # (just as target)
-        embedded_train_inputs = self._embed_and_dropout(
-            self.train_inputs[:-1])
+            # last train input is unused in decoding functions
+            # (just as target)
+            embedded_train_inputs = self._embed_and_dropout(
+                self.train_inputs[:-1])
 
-        # attention has done(?) dropout
-        embedded_go_symbols = tf.nn.embedding_lookup(self.embedding_matrix,
+            # attention has done(?) dropout
+            embedded_go_symbols = tf.nn.embedding_lookup(self.embedding_matrix,
                                                      self.go_symbols)
 
-        # fetch train attention objects
-        self._train_attention_objects = {}
-        # type: Dict[Attentive, tf.Tensor]
-        if self.use_attention:
-            with tf.name_scope("attention_object"):
-                self._train_attention_objects = {
+            # fetch train attention objects
+            self._train_attention_objects = {}
+            # type: Dict[Attentive, tf.Tensor]
+            if self.use_attention:
+                with tf.name_scope("attention_object"):
+                    self._train_attention_objects = {
+                        e: e.create_attention_object()
+                        for e in self.encoders
+                        if isinstance(e, Attentive)}
+
+            train_rnn_outputs, _ = self._attention_decoder(
+                embedded_go_symbols,
+                attention_on_input=attention_on_input,
+                train_inputs=embedded_train_inputs,
+                train_mode=True)
+
+            assert not tf.get_variable_scope().reuse
+            tf.get_variable_scope().reuse_variables()
+
+            # fetch runtime attention objects
+            self._runtime_attention_objects = {}
+            # type: Dict[Attentive, tf.Tensor]
+            if self.use_attention:
+                self._runtime_attention_objects = {
                     e: e.create_attention_object()
                     for e in self.encoders
                     if isinstance(e, Attentive)}
 
-        train_rnn_outputs, _ = self._attention_decoder(
-            embedded_go_symbols,
-            attention_on_input=attention_on_input,
-            train_inputs=embedded_train_inputs,
-            train_mode=True)
+            (self.runtime_rnn_outputs,
+             self.runtime_rnn_states) = self._attention_decoder(
+                 embedded_go_symbols,
+                 attention_on_input=attention_on_input,
+                 train_mode=False)
 
-        assert not tf.get_variable_scope().reuse
-        tf.get_variable_scope().reuse_variables()
+            self.hidden_states = self.runtime_rnn_outputs
 
-        # fetch runtime attention objects
-        self._runtime_attention_objects = {}
-        # type: Dict[Attentive, tf.Tensor]
-        if self.use_attention:
-            self._runtime_attention_objects = {
-                e: e.create_attention_object()
-                for e in self.encoders
-                if isinstance(e, Attentive)}
+            def decode(rnn_outputs):
+                with tf.name_scope("output_projection"):
+                    logits = []
+                    decoded = []
 
-        (self.runtime_rnn_outputs,
-         self.runtime_rnn_states) = self._attention_decoder(
-            embedded_go_symbols,
-            attention_on_input=attention_on_input,
-            train_mode=False)
+                    for out in rnn_outputs:
+                        out_activation = self._logit_function(out)
+                        logits.append(out_activation)
+                        decoded.append(tf.argmax(out_activation[:, 1:], 1) + 1)
 
-        self.hidden_states = self.runtime_rnn_outputs
+                    return decoded, logits
 
-        def decode(rnn_outputs):
-            with tf.name_scope("output_projection"):
-                logits = []
-                decoded = []
+            _, self.train_logits = decode(train_rnn_outputs)
 
-                for out in rnn_outputs:
-                    out_activation = self._logit_function(out)
-                    logits.append(out_activation)
-                    decoded.append(tf.argmax(out_activation[:, 1:], 1) + 1)
+            train_targets = tf.unpack(self.train_inputs)
 
-                return decoded, logits
+            self.train_loss = tf.nn.seq2seq.sequence_loss(
+                self.train_logits, train_targets,
+                tf.unpack(self.train_padding), len(self.vocabulary))
+            self.cost = self.train_loss
 
-        _, self.train_logits = decode(train_rnn_outputs)
+            self.train_logprobs = [tf.nn.log_softmax(l)
+                                   for l in self.train_logits]
 
-        train_targets = tf.unpack(self.train_inputs)
+            self.decoded, self.runtime_logits = decode(
+                self.runtime_rnn_outputs)
 
-        self.train_loss = tf.nn.seq2seq.sequence_loss(
-            self.train_logits, train_targets,
-            tf.unpack(self.train_padding), len(self.vocabulary))
-        self.cost = self.train_loss
+            self.runtime_loss = tf.nn.seq2seq.sequence_loss(
+                self.runtime_logits, train_targets,
+                tf.unpack(self.train_padding), len(self.vocabulary))
 
-        self.train_logprobs = [tf.nn.log_softmax(l)
-                               for l in self.train_logits]
+            self.runtime_logprobs = [tf.nn.log_softmax(l)
+                                     for l in self.runtime_logits]
 
-        self.decoded, self.runtime_logits = decode(
-            self.runtime_rnn_outputs)
+            tf.scalar_summary('train_loss_with_gt_intpus',
+                              self.train_loss,
+                              collections=["summary_train"])
 
-        self.runtime_loss = tf.nn.seq2seq.sequence_loss(
-            self.runtime_logits, train_targets,
-            tf.unpack(self.train_padding), len(self.vocabulary))
+            tf.scalar_summary('train_loss_with_decoded_inputs',
+                              self.runtime_loss,
+                              collections=["summary_train"])
 
-        self.runtime_logprobs = [tf.nn.log_softmax(l)
-                                 for l in self.runtime_logits]
+            tf.scalar_summary('train_optimization_cost', self.cost,
+                              collections=["summary_train"])
 
-        tf.scalar_summary('train_loss_with_gt_intpus',
-                          self.train_loss,
-                          collections=["summary_train"])
+            self._visualize_attention()
 
-        tf.scalar_summary('train_loss_with_decoded_inputs',
-                          self.runtime_loss,
-                          collections=["summary_train"])
-
-        tf.scalar_summary('train_optimization_cost', self.cost,
-                          collections=["summary_train"])
-
-        self._visualize_attention()
-
-        log("Decoder initalized.")
+            log("Decoder initalized.")
 
     def sample_batch(self, k):
         """
@@ -334,13 +338,14 @@ class Decoder(object):
             return self._runtime_attention_objects.get(encoder)
 
     # pylint: disable=too-many-branches
-    def _attention_decoder(self,
-                           go_symbols: tf.Tensor,
-                           train_inputs: tf.Tensor = None,
-                           attention_on_input=True,
-                           train_mode: bool = False,
-                           scope: Union[str, tf.VariableScope] = None) -> \
-            Tuple[List[tf.Tensor], List[tf.Tensor]]:
+    def _attention_decoder(
+            self,
+            go_symbols: tf.Tensor,
+            train_inputs: tf.Tensor=None,
+            attention_on_input=True,
+            train_mode: bool=False,
+            scope: Union[str, tf.VariableScope]=None) -> Tuple[
+                List[tf.Tensor], List[tf.Tensor]]:
         """Run the decoder RNN.
 
         Arguments:
@@ -433,35 +438,39 @@ class Decoder(object):
                 collections=["summary_val_plots"],
                 max_images=256)
 
-    def feed_dict(self, dataset, train=False):
+    def feed_dict(self, dataset: Dataset, train: bool=False) -> FeedDict:
         """Populate the feed dictionary for the decoder object
 
         Arguments:
             dataset: The dataset to use for the decoder.
             train: Boolean flag, telling whether this is a training run
         """
-        sentences = dataset.get_series(self.data_id, allow_none=True)
+        sentences = cast(Iterable[List[str]],
+                         dataset.get_series(self.data_id, allow_none=True))
+
         if sentences is None and train:
             raise ValueError("When training, you must feed "
                              "reference sentences")
 
-        res = {}
-        res[self.train_mode] = train
+        sentences_list = list(sentences) if sentences is not None else None
+
+        fd = {}  # type: FeedDict
+        fd[self.train_mode] = train
 
         go_symbol_idx = self.vocabulary.get_word_index(START_TOKEN)
-        res[self.go_symbols] = np.full([1, len(dataset)], go_symbol_idx,
-                                       dtype=np.int32)
+        fd[self.go_symbols] = np.full([1, len(dataset)], go_symbol_idx,
+                                      dtype=np.int32)
 
         if sentences is not None:
             # train_mode=False, since we don't want to <unk>ize target words!
             inputs, weights = self.vocabulary.sentences_to_tensor(
-                sentences, self.max_output_len, train_mode=False,
+                sentences_list, self.max_output_len, train_mode=False,
                 add_start_symbol=False, add_end_symbol=True)
 
-            assert inputs.shape == (self.max_output_len, len(sentences))
-            assert weights.shape == (self.max_output_len, len(sentences))
+            assert inputs.shape == (self.max_output_len, len(sentences_list))
+            assert weights.shape == (self.max_output_len, len(sentences_list))
 
-            res[self.train_inputs] = inputs
-            res[self.train_padding] = weights
+            fd[self.train_inputs] = inputs
+            fd[self.train_padding] = weights
 
-        return res
+        return fd
