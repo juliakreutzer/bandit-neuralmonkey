@@ -320,9 +320,9 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
     log("Starting training")
     try:
-        for i in range(epochs):
+        for epoch_n in range(1, epochs + 1):
             log_print("")
-            log("Epoch {} starts".format(i + 1), color='red')
+            log("Epoch {} starts".format(epoch_n), color='red')
             train_dataset.shuffle()
             train_batched_datasets = train_dataset.batch_dataset(batch_size)
 
@@ -377,8 +377,13 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             "{}/{}".format(generated_id, function.name)] = function(
                             sentences_2, desired_output)
 
+                        limit_examples = 3
+                        example_counter = 0
                         for d, s1, s2, p1, p2 in zip(desired_output, sentences_1,
                                            sentences_2, logprobs_1, logprobs_2):
+                            example_counter += 1
+                            if example_counter > limit_examples:
+                                break
                             r1 = function(s1, d)
                             r2 = function(s2, d)
                             b1 = BLEUEvaluator.bleu(s1, d)
@@ -393,7 +398,14 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                                          b2))  # TODO print nice, only few of them
                             print("diff bleu: {}, diff prob: {}".
                                   format((b1-b2), (np.sum(p1)-np.sum(p2))))
-                            rewards.append(b1-b2)  # TODO different pairwise reward definitions
+
+                            # binary
+                            reward = 1 if b1 > b2 else 0
+
+                            # continuous
+                            #reward = b1-b2
+
+                            rewards.append(reward)  # TODO different pairwise reward definitions
 
 
 
@@ -422,8 +434,13 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             "{}/{}".format(generated_id, function.name)] = function(
                             sentences, desired_output)
 
+                        limit_examples = 3
+                        example_counter = 0
                         for d, s, p in zip(desired_output, sentences,
                                            sampled_logprobs):
+                            example_counter += 1
+                            if example_counter > limit_examples:
+                                break
                             r = function(s, d)
                             b = BLEUEvaluator.bleu(s,d)
                             print("ref: {}\nsample: {}\nprob: {}\nreward:"
@@ -443,9 +460,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 log("loss: {}".format(update_result[0].loss), color='red')
 
-
                 if step % logging_period == logging_period - 1:
-
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
                         postprocess, write_out=False)
@@ -453,9 +468,12 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         evaluators, batch_dataset, runners,
                         train_results, train_outputs)
 
-                    _log_continuous_evaluation(tb_writer, main_metric,
+                    _log_continuous_evaluation(tb_writer, tf_manager,
+                                               main_metric,
                                                train_evaluation,
                                                seen_instances,
+                                               epoch_n,
+                                               epochs,
                                                train_results,
                                                train=True)
 
@@ -484,7 +502,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                     if is_better(this_score, best_score, minimize_metric):
                         best_score = this_score
-                        best_score_epoch = i + 1
+                        best_score_epoch = epoch_n
                         best_score_batch_no = batch_n
 
                     worst_index = argworst(saved_scores, minimize_metric)
@@ -507,10 +525,13 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             saved_scores))
 
                     log("Validation (epoch {}, batch number {}):"
-                        .format(i + 1, batch_n), color='blue')
+                        .format(epoch_n + 1, batch_n), color='blue')
 
-                    _log_continuous_evaluation(tb_writer, main_metric,
-                                               val_evaluation, seen_instances,
+                    _log_continuous_evaluation(tb_writer, tf_manager,
+                                               main_metric,
+                                               val_evaluation,
+                                               seen_instances, epoch_n,
+                                               epochs,
                                                val_results, train=False)
 
                     if this_score == best_score:
