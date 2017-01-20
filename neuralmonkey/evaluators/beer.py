@@ -29,32 +29,36 @@ class BeerWrapper(object):
         ref_bytes = self.serialize_to_bytes(references)
         dec_bytes = self.serialize_to_bytes(decoded)
 
-        reffile = tempfile.NamedTemporaryFile()
-        reffile.write(ref_bytes)
-        reffile.flush()
+        with tempfile.NamedTemporaryFile() as reffile, \
+                tempfile.NamedTemporaryFile() as decfile:
 
-        decfile = tempfile.NamedTemporaryFile()
-        decfile.write(dec_bytes)
-        decfile.flush()
+            reffile.write(ref_bytes)
+            reffile.flush()
 
-        args = [self.wrapper, "-r", reffile.name, "-s", decfile.name]
+            decfile.write(dec_bytes)
+            decfile.flush()
 
-        output_proc = subprocess.run(args,
-                                     stderr=subprocess.PIPE,
-                                     stdout=subprocess.PIPE)
+            args = [self.wrapper, "-r", reffile.name, "-s", decfile.name]
 
-        proc_stdout = output_proc.stdout.decode("utf-8")  # type: ignore
-        lines = proc_stdout.splitlines()
+            output_proc = subprocess.run(args,
+                                         stderr=subprocess.PIPE,
+                                         stdout=subprocess.PIPE)
 
-        try:
-            beer_score = float(lines[0].split()[-1])
-            return beer_score
-        except IndexError:
-            log("Error: Malformed output from BEER wrapper:", color="red")
-            log(proc_stdout, color="red")
-            log("=======", color="red")
-            return 0.0
-        except ValueError:
-            log("Value error - beer '{}' is not a number.".format(lines[0]),
-                color="red")
-            return 0.0
+            proc_stdout = output_proc.stdout.decode("utf-8")  # type: ignore
+            lines = proc_stdout.splitlines()
+
+            if len(lines) == 0:
+                return 0.0
+
+            try:
+                beer_score = float(lines[0].split()[-1])
+                return beer_score
+            except IndexError:
+                log("Error: Malformed output from BEER wrapper:", color="red")
+                log(proc_stdout, color="red")
+                log("=======", color="red")
+                return 0.0
+            except ValueError:
+                log("Value error - beer '{}' is not a number.".format(lines[0]),
+                    color="red")
+                return 0.0

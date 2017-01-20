@@ -362,53 +362,39 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                     logprobs_1, logprobs_2 = sampled_logprobs
 
-                    eval_result_1 = {}
-                    eval_result_2 = {}
-
                     for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
 
                         desired_output = batch_dataset.get_series(dataset_id)
 
-                        eval_result_1[
-                            "{}/{}".format(generated_id, function.name)] = function(
-                            sentences_1, desired_output)
+                        print(len(sentences_1))
+                        print(len(sentences_2))
+                        print(len(desired_output))
 
-                        eval_result_2[
-                            "{}/{}".format(generated_id, function.name)] = function(
-                            sentences_2, desired_output)
-
-                        limit_examples = 3
-                        example_counter = 0
                         for d, s1, s2, p1, p2 in zip(desired_output, sentences_1,
                                            sentences_2, logprobs_1, logprobs_2):
-                            example_counter += 1
-                            if example_counter > limit_examples:
-                                break
+
                             r1 = function(s1, d)
                             r2 = function(s2, d)
-                            b1 = BLEUEvaluator.bleu(s1, d)
-                            b2 = BLEUEvaluator.bleu(s2, d)
-                            print("ref: {}\nsample_1: {}\nprob: {}\nreward:"
-                                  " {}\nbleu: {}\nsample_2: {}\nprob: {}\nreward:"
-                                  " {}\nbleu: {}".format(" ".join(d),
-                                                         " ".join(s1),
-                                                         np.exp(np.sum(p1)), r1,
-                                                         b1, " ".join(s2),
-                                                         np.exp(np.sum(p2)), r2,
-                                                         b2))  # TODO print nice, only few of them
-                            print("diff bleu: {}, diff prob: {}".
-                                  format((b1-b2), (np.sum(p1)-np.sum(p2))))
+
+                            # TODO some evaluators might return error not reward
+                            print("ref: {}\nsample_1: {}\nprob: {}\n{}:"
+                                  " {}\nsample_2: {}\nprob: {}\n{}:"
+                                  " {}".format(" ".join(d), " ".join(s1),
+                                               np.exp(np.sum(p1)),
+                                               function.name, r1,
+                                               " ".join(s2),
+                                               np.exp(np.sum(p2)), function.name,
+                                               r2))  # TODO print nice, only few of them
+                            print("diff reward: {}, diff prob: {}".
+                                  format((r1-r2), (np.sum(p1)-np.sum(p2))))
 
                             # binary
-                            reward = 1 if b1 > b2 else 0
+                            reward = 1 if r1 > r2 else 0
 
                             # continuous
                             #reward = b1-b2
 
                             rewards.append(reward)  # TODO different pairwise reward definitions
-
-
-
 
                 # for objectives with one sample for each sentence
                 else:
@@ -422,32 +408,17 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         vectors_to_sentences(sample_arrays)  # FIXME ugly
 
                     # evaluate samples
-                    # TODO implement sentence-wise evaluator, e.g. sBLEU, check mixer
-                    # TODO use evaluator specified in params
-
-                    eval_result = {}
                     for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
 
                         desired_output = batch_dataset.get_series(dataset_id)
 
-                        eval_result[
-                            "{}/{}".format(generated_id, function.name)] = function(
-                            sentences, desired_output)
-
-                        limit_examples = 3
-                        example_counter = 0
                         for d, s, p in zip(desired_output, sentences,
                                            sampled_logprobs):
-                            example_counter += 1
-                            if example_counter > limit_examples:
-                                break
                             r = function(s, d)
-                            b = BLEUEvaluator.bleu(s,d)
-                            print("ref: {}\nsample: {}\nprob: {}\nreward:"
-                                  " {}\nbleu: {}".format(" ".join(d), " ".join(s),
-                                                         np.exp(np.sum(p)), r, b))  # TODO print nice, only few of them
-                            rewards.append(b)
-                    # TODO something is wrong with sentence BLEU, maybe fixable with sync?
+                            print("ref: {}\nsample: {}\nprob: {}\n{}: {}"
+                                  .format(" ".join(d), " ".join(s),
+                                          np.exp(np.sum(p)), function.name, r))  # TODO print nice, only few of them
+                            rewards.append(r)
 
                 # update model with samples and their rewards
                 summaries_bool = step % logging_period == logging_period - 1
