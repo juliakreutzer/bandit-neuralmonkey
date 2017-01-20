@@ -376,25 +376,28 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             r1 = function(s1, d)
                             r2 = function(s2, d)
 
-                            # TODO some evaluators might return error not reward
-                            print("ref: {}\nsample_1: {}\nprob: {}\n{}:"
-                                  " {}\nsample_2: {}\nprob: {}\n{}:"
-                                  " {}".format(" ".join(d), " ".join(s1),
-                                               np.exp(np.sum(p1)),
-                                               function.name, r1,
-                                               " ".join(s2),
-                                               np.exp(np.sum(p2)), function.name,
-                                               r2))  # TODO print nice, only few of them
-                            print("diff reward: {}, diff prob: {}".
-                                  format((r1-r2), (np.sum(p1)-np.sum(p2))))
+                            # TODO different pairwise reward definitions
 
                             # binary
                             reward = 1 if r1 > r2 else 0
 
                             # continuous
-                            #reward = b1-b2
+                            # reward = b1-b2
 
-                            rewards.append(reward)  # TODO different pairwise reward definitions
+                            rewards.append(reward)
+
+                            if len(rewards) <= 3:
+                                # TODO some evaluators might return error not reward
+                                print("ref: {}\nsample_1: {}\nprob: {}\n{}:"
+                                      " {}\nsample_2: {}\nprob: {}\n{}:"
+                                      " {}".format(" ".join(d), " ".join(s1),
+                                                   np.exp(np.sum(p1)),
+                                                   function.name, r1,
+                                                   " ".join(s2),
+                                                   np.exp(np.sum(p2)), function.name,
+                                                   r2))  # TODO print nice, only few of them
+                                print("diff reward: {}, diff prob: {}".
+                                      format((r1-r2), (np.sum(p1)-np.sum(p2))))
 
                 # for objectives with one sample for each sentence
                 else:
@@ -415,10 +418,12 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         for d, s, p in zip(desired_output, sentences,
                                            sampled_logprobs):
                             r = function(s, d)
-                            print("ref: {}\nsample: {}\nprob: {}\n{}: {}"
-                                  .format(" ".join(d), " ".join(s),
-                                          np.exp(np.sum(p)), function.name, r))  # TODO print nice, only few of them
                             rewards.append(r)
+
+                            if len(rewards) <= 3:
+                                print("ref: {}\nsample: {}\nprob: {}\n{}: {}"
+                                      .format(" ".join(d), " ".join(s),
+                                              np.exp(np.sum(p)), function.name, r))  # TODO print nice, only few of them
 
                 # update model with samples and their rewards
                 summaries_bool = step % logging_period == logging_period - 1
