@@ -35,12 +35,15 @@ class GenericBanditTrainer(object):
 
     def __init__(self, objective: BanditObjective,
                  l1_weight=0.0, l2_weight=0.0,
-                 clip_norm=False, optimizer=None, pairwise=False) -> None:
+                 clip_norm=False, optimizer=None, pairwise=False,
+                 binary_feedback=False)\
+            -> None:
 
         self.optimizer = optimizer or tf.train.AdamOptimizer(1e-4)
         self.objective = objective
 
         self.pairwise = pairwise
+        self.binary_feedback = binary_feedback
 
         with tf.variable_scope('regularization'):
             regularizable = [v for v in tf.trainable_variables()
