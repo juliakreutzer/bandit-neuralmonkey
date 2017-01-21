@@ -18,15 +18,15 @@ initialize_vocabulary = vocabulary.initialize_vocabulary
 
 
 def adam_optimizer(learning_rate=1e-4):
-    return tf.train.AdamOptimizer(learning_rate)
+    return tf.train.AdamOptimizer(learning_rate, name="AdamOptimizer")
 
 
 def adadelta_optimizer(**kwargs):
-    return tf.train.AdadeltaOptimizer(**kwargs)
+    return tf.train.AdadeltaOptimizer(**kwargs, name="AdadeltaOptimizer")
 
 
 def sgd_optimizer(learning_rate=1e-4):
-    return tf.train.GradientDescentOptimizer(learning_rate)
+    return tf.train.GradientDescentOptimizer(learning_rate, name="SGDOptimizer")
 
 
 def variable(initial_value=0, trainable=False, **kwargs):
