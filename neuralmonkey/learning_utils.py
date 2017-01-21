@@ -386,7 +386,9 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                             rewards.append(reward)
 
-                            if len(rewards) <= 3:
+                            if len(rewards) <= 3 \
+                                    and step % logging_period \
+                                            == logging_period - 1:
                                 # TODO some evaluators might return error not reward
                                 print("ref: {}\nsample_1: {}\nprob: {}\n{}:"
                                       " {}\nsample_2: {}\nprob: {}\n{}:"
@@ -420,7 +422,9 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             r = function(s, d)
                             rewards.append(r)
 
-                            if len(rewards) <= 3:
+                            if len(rewards) <= 3\
+                                    and step % logging_period\
+                                            == logging_period - 1:
                                 print("ref: {}\nsample: {}\nprob: {}\n{}: {}"
                                       .format(" ".join(d), " ".join(s),
                                               np.exp(np.sum(p)), function.name, r))  # TODO print nice, only few of them
