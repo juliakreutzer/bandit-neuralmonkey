@@ -330,7 +330,6 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 step += 1
                 seen_instances += len(batch_dataset)
-                log("dataset batch #{}".format(batch_n))
 
                 tf_manager.init_bandits([trainer])
 
@@ -346,8 +345,6 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 rewards = []
                 # for objectives with pairs of samples
                 if trainer.pairwise:
-                    log("Evaluating pairs of samples.")
-
                     # sampled_outputs and sampled_logprobs contains 2 samples
                     # for each sentence
 
@@ -403,8 +400,6 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 # for objectives with one sample for each sentence
                 else:
-                    log("Evaluating single samples.")
-
                     # ids to words
                     # sample dimension is squeezed
                     sample_arrays = [np.squeeze(o, 1) for o in sampled_outputs]
@@ -505,7 +500,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             saved_scores))
 
                     log("Validation (epoch {}, batch number {}):"
-                        .format(epoch_n + 1, batch_n), color='blue')
+                        .format(epoch_n, batch_n), color='blue')
 
                     _log_continuous_evaluation(tb_writer, tf_manager,
                                                main_metric,
