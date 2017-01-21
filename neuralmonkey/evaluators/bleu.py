@@ -25,7 +25,8 @@ class BLEUEvaluator(object):
         if self.deduplicate:
             decoded = BLEUEvaluator._deduplicate_sentences(decoded)
 
-        return 100 * BLEUEvaluator.bleu(decoded, listed_references, self.n)
+        #return 100 * BLEUEvaluator.bleu(decoded, listed_references, self.n)
+        return BLEUEvaluator.bleu(decoded, listed_references, self.n)
 
     @staticmethod
     def ngram_counts(sentence: List[str], n: int,
