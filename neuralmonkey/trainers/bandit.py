@@ -1,7 +1,7 @@
 from typing import Any, List
 
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer, \
-    BanditObjective, _clip_log_probs
+    BanditObjective, _clip_probs, _scale_gradients
 from neuralmonkey.logging import log
 
 
@@ -19,11 +19,13 @@ def expected_loss_objective(decoder, k) -> BanditObjective:
         sample_logprobs=tf.add_n(decoder.sample_logprobs),
         loss=-tf.reduce_mean(tf.mul(tf.add_n(decoder.sample_probs),
                              decoder.rewards), [0, 1]),
+        gradients=lambda grad_fun: grad_fun(
+            tf.mul(tf.add_n(decoder.sample_logprobs), -decoder.rewards)),
         sample_size=k
     )
 
 
-def cross_entropy_objective(decoder, k) -> BanditObjective:
+def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     # TODO use k
     return BanditObjective(
@@ -33,11 +35,14 @@ def cross_entropy_objective(decoder, k) -> BanditObjective:
         sample_logprobs=tf.add_n(decoder.sample_logprobs),
         loss=-tf.reduce_mean(tf.mul(tf.add_n(decoder.sample_logprobs),
                              decoder.rewards), [0, 1]),
-        # TODO clipping?
+        gradients=lambda grad_fun: _scale_gradients(
+            grad_fun(tf.add_n(decoder.sample_probs)),
+            -tf.reduce_mean(
+                decoder.rewards/_clip_probs(
+                    tf.add_n(decoder.sample_probs), clip_prob))),
         sample_size=k
     )
 
-# TODO different kinds of feedback
 def pairwise_objective(decoder, k) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     return BanditObjective(
@@ -48,10 +53,12 @@ def pairwise_objective(decoder, k) -> BanditObjective:
                          tf.add_n(decoder.sample_logprobs_2)],
         loss=-tf.reduce_mean(tf.mul(tf.add_n(decoder.pair_probs),
                              decoder.rewards), [0, 1]),
+        gradients=lambda grad_fun: grad_fun(tf.mul(
+            tf.add_n(decoder.pair_logprobs), -decoder.rewards)),
         sample_size=k
     )
 
-def pairwise_xent_objective(decoder, k) -> BanditObjective:
+def pairwise_xent_objective(decoder, k, clip_prob) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     return BanditObjective(
         name="{} - pairwise_xent".format(decoder.name),
@@ -61,6 +68,11 @@ def pairwise_xent_objective(decoder, k) -> BanditObjective:
                          tf.add_n(decoder.sample_logprobs_2)],
         loss=-tf.reduce_mean(tf.mul(tf.add_n(decoder.pair_logprobs),
                                     decoder.rewards), [0, 1]),
+        gradients=lambda grad_fun: _scale_gradients(
+            grad_fun(tf.add_n(decoder.pair_probs)),
+            -tf.reduce_mean(
+                decoder.rewards/_clip_probs(
+                    tf.add_n(decoder.pair_probs), clip_prob))),
         sample_size=k
     )
 
@@ -81,8 +93,8 @@ class ExpectedLossTrainer(GenericBanditTrainer):
 class CrossEntropyTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
-                 binary_feedback=False) -> None:
-        objective = cross_entropy_objective(decoders[0], k)
+                 binary_feedback=False, clip_prob=0.0) -> None:
+        objective = cross_entropy_objective(decoders[0], k, clip_prob=clip_prob)
         super(CrossEntropyTrainer, self).__init__(
             objective, l1_weight, l2_weight,
             clip_norm=clip_norm,
@@ -104,8 +116,8 @@ class PairwiseTrainer(GenericBanditTrainer):
 class PairwiseXentTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
-                 binary_feedback=False) -> None:
-        objective = pairwise_objective(decoders[0], k)
+                 binary_feedback=False, clip_prob=0.0) -> None:
+        objective = pairwise_xent_objective(decoders[0], k, clip_prob=clip_prob)
         super(PairwiseXentTrainer, self).__init__(
             objective, l1_weight, l2_weight,
             clip_norm=clip_norm,

@@ -22,6 +22,7 @@ BanditObjective = NamedTuple('BanditObjective',
                         ('samples', Any),  # TODO better type
                         ('sample_logprobs', Any),
                         ('loss', Any),
+                        ('gradients', Any),
                         ('sample_size', int)])
 
 BIAS_REGEX = re.compile(r'[Bb]ias')
@@ -62,8 +63,12 @@ class GenericBanditTrainer(object):
 
         # loss is scalar, avg over batch
         self.loss = self.objective.loss + self.regularizer_cost
-        self.gradients = self.optimizer.compute_gradients(self.loss)
 
+        # compute and apply gradients
+        self.gradients = self.objective.gradients(self._get_gradients)
+        self.reg_gradients = self._get_gradients(self.regularizer_cost)
+        self.minimize = self.optimizer.apply_gradients(
+            _sum_gradients([self.gradients, self.reg_gradients]))
 
         self.all_coders = set.union(collect_encoders(self.objective.decoder))
 
@@ -85,7 +90,6 @@ class GenericBanditTrainer(object):
         self.scalar_summaries = tf.merge_summary(
             tf.get_collection("summary_train"))
 
-    # only use for computing regularizers
     def _get_gradients(self, tensor: tf.Tensor) -> Gradients:
         gradient_list = self.optimizer.compute_gradients(
             tensor, tf.trainable_variables())
@@ -122,17 +126,22 @@ def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:
     return [(tensor, var) for var, tensor in summed_dict.items()]
 
 
-def _clip_log_probs(log_probs, prob_threshold):
-    """ Clip log probabilities to some threshold """
-    # threshold is prob, input are log probs
+def _scale_gradients(gradients: [Gradients], scalar) -> Gradients:
+    scaled_grads = []
+    for tensor, var in gradients:
+        if tensor is not None:
+            scaled_grads.append((tensor*scalar, var))
+    return scaled_grads
+
+
+def _clip_probs(probs, prob_threshold):
+    """ Clip probabilities to some threshold """
     if prob_threshold > 0.00:
         log("Clipping probs <= {}".format(prob_threshold))
-        log_threshold = np.log(prob_threshold)
-        log_max_value = tf.log(tf.constant(1.0))
-        return tf.clip_by_value(log_probs, clip_value_min=log_threshold,
-                            clip_value_max=log_max_value)
+        return tf.clip_by_value(probs, clip_value_min=prob_threshold,
+                            clip_value_max=1)
     else:
-        return log_probs
+        return probs
 
 
 class UpdateBanditExecutable(BanditExecutable):
