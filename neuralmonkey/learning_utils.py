@@ -315,6 +315,22 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                            tf_manager.sessions[0].graph)
         log("TensorBoard writer initialized.")
 
+    log("Initial result on dev: ")
+    val_results, val_outputs = run_on_dataset(
+        tf_manager, runners, val_dataset,
+        postprocess, write_out=False,
+        batch_size=runners_batch_size)
+    val_evaluation = evaluation(
+        evaluators, val_dataset, runners, val_results,
+        val_outputs)
+    if log_directory:
+        _log_continuous_evaluation(tb_writer, tf_manager,
+                                   main_metric,
+                                   val_evaluation,
+                                   seen_instances, 0,
+                                   epochs,
+                                   val_results, train=False)
+
     best_score_epoch = 0
     best_score_batch_no = 0
 
