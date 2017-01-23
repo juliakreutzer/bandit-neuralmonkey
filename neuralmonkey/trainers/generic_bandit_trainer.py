@@ -73,8 +73,12 @@ class GenericBanditTrainer(object):
             # compute and apply gradients
             self.gradients = self.objective.gradients(self._get_gradients)
             self.reg_gradients = self._get_gradients(self.regularizer_cost)
-            self.minimize = self.optimizer.apply_gradients(
-                _sum_gradients([self.gradients, self.reg_gradients]))
+
+            if clip_norm:
+                assert clip_norm > 0.0
+                self.gradients = [(tf.clip_by_norm(grad, clip_norm), var)
+                             for grad, var in self.gradients
+                             if grad is not None]
 
             self.all_coders = set.union(
                 collect_encoders(self.objective.decoder))
@@ -83,7 +87,8 @@ class GenericBanditTrainer(object):
 
             self.sample_op = self.objective.samples, \
                              self.objective.sample_logprobs
-            self.update_op = self.optimizer.apply_gradients(self.gradients)
+            self.update_op = self.optimizer.apply_gradients(
+                _sum_gradients([self.gradients, self.reg_gradients]))
 
             with tf.control_dependencies([self.update_op]):
                 self.dummy = tf.constant(0)
