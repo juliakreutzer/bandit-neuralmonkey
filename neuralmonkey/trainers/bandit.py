@@ -16,11 +16,11 @@ def expected_loss_objective(decoder, k) -> BanditObjective:
         name="{} - expected_loss".format(decoder.name),
         decoder=decoder,
         samples=decoder.sample_ids,
-        sample_logprobs=tf.add_n(decoder.sample_logprobs),
-        loss=-tf.reduce_mean(tf.mul(tf.add_n(decoder.sample_probs),
-                             decoder.rewards), [0, 1]),
+        sample_logprobs=decoder.sample_logprobs,
+        loss=-tf.reduce_mean(tf.mul(decoder.sample_probs, decoder.rewards),
+                             [0, 1]),
         gradients=lambda grad_fun: grad_fun(
-            tf.mul(tf.add_n(decoder.sample_logprobs), -decoder.rewards)),
+            tf.mul(decoder.sample_logprobs, -decoder.rewards)),
         sample_size=k
     )
 
@@ -32,14 +32,13 @@ def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
         name="{} - cross-entropy".format(decoder.name),
         decoder=decoder,
         samples=decoder.sample_ids,
-        sample_logprobs=tf.add_n(decoder.sample_logprobs),
-        loss=-tf.reduce_mean(tf.mul(tf.add_n(decoder.sample_logprobs),
-                             decoder.rewards), [0, 1]),
+        sample_logprobs=decoder.sample_logprobs,
+        loss=-tf.reduce_mean(tf.mul(decoder.sample_logprobs, decoder.rewards),
+                             [0, 1]),
         gradients=lambda grad_fun: _scale_gradients(
-            grad_fun(tf.add_n(decoder.sample_probs)),
+            grad_fun(decoder.sample_probs),
             -tf.reduce_mean(
-                decoder.rewards/_clip_probs(
-                    tf.add_n(decoder.sample_probs), clip_prob))),
+                decoder.rewards/_clip_probs(decoder.sample_probs, clip_prob))),
         sample_size=k
     )
 
@@ -49,12 +48,11 @@ def pairwise_objective(decoder, k) -> BanditObjective:
         name="{} - pairwise".format(decoder.name),
         decoder=decoder,
         samples=[decoder.sample_ids, decoder.sample_ids_2],
-        sample_logprobs=[tf.add_n(decoder.sample_logprobs),
-                         tf.add_n(decoder.sample_logprobs_2)],
-        loss=-tf.reduce_mean(tf.mul(tf.add_n(decoder.pair_probs),
-                             decoder.rewards), [0, 1]),
+        sample_logprobs=[decoder.sample_logprobs, decoder.sample_logprobs_2],
+        loss=-tf.reduce_mean(tf.mul(decoder.pair_probs, decoder.rewards),
+                             [0, 1]),
         gradients=lambda grad_fun: grad_fun(tf.mul(
-            tf.add_n(decoder.pair_logprobs), -decoder.rewards)),
+            decoder.pair_logprobs, -decoder.rewards)),
         sample_size=k
     )
 
@@ -64,15 +62,14 @@ def pairwise_xent_objective(decoder, k, clip_prob) -> BanditObjective:
         name="{} - pairwise_xent".format(decoder.name),
         decoder=decoder,
         samples=[decoder.sample_ids, decoder.sample_ids_2],
-        sample_logprobs=[tf.add_n(decoder.sample_logprobs),
-                         tf.add_n(decoder.sample_logprobs_2)],
-        loss=-tf.reduce_mean(tf.mul(tf.add_n(decoder.pair_logprobs),
+        sample_logprobs=[decoder.sample_logprobs,
+                         decoder.sample_logprobs_2],
+        loss=-tf.reduce_mean(tf.mul(decoder.pair_logprobs,
                                     decoder.rewards), [0, 1]),
         gradients=lambda grad_fun: _scale_gradients(
-            grad_fun(tf.add_n(decoder.pair_probs)),
+            grad_fun(decoder.pair_probs),
             -tf.reduce_mean(
-                decoder.rewards/_clip_probs(
-                    tf.add_n(decoder.pair_probs), clip_prob))),
+                decoder.rewards/_clip_probs(decoder.pair_probs, clip_prob))),
         sample_size=k
     )
 

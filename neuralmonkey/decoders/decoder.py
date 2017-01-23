@@ -233,22 +233,26 @@ class Decoder(ModelPart):
             # sampling
             self.sample_size = 1  # TODO make param and use
             # FIXME add multiple samples
-            self.sample_logprobs, sample_ids = self.sample_batch()  # timestep-length list of batch_size x 1
+            sample_logprobs_time, sample_ids = self.sample_batch()  # timestep-length list of batch_size x 1
             self.sample_ids = tf.pack(sample_ids)  # time x batch x sample_size
+            sample_logprobs_time = tf.pack(sample_logprobs_time)
+            self.sample_logprobs = tf.reduce_sum(sample_logprobs_time, 0)  # batch x sample_size for full sequence
+            log("sample log probs: {}".format(self.sample_logprobs))
 
-            self.sample_probs = [tf.exp(lp) for lp in
-                                 self.sample_logprobs]  # timestep-length list of batch_size x sample_size tensors
+
+            self.sample_probs = tf.exp(self.sample_logprobs)  # timestep-length list of batch_size x sample_size tensors
 
             # second sample, needed for some bandit objectives
             # TODO find other way of sampling pairs
             # TODO does that make sense?
             # FIXME get probs for negative weights (self.runtime_logits_neg)
-            self.sample_logprobs_2, sample_ids_2 = self.sample_batch(neg=True)
+            sample_logprobs_time_2, sample_ids_2 = self.sample_batch(neg=True)
             self.sample_ids_2 = tf.pack(sample_ids_2)
-            self.sample_probs_2 = [tf.exp(lp) for lp in self.sample_logprobs_2]
-            self.pair_logprobs = [i+j for i, j in zip(self.sample_logprobs,
-                                                        self.sample_logprobs_2)]
-            self.pair_probs = [tf.exp(lp) for lp in self.pair_logprobs]
+            sample_logprobs_time_2 = tf.pack(sample_logprobs_time_2)
+            self.sample_logprobs_2 = tf.reduce_sum(sample_logprobs_time_2, 0)  # batch x sample_size
+            self.sample_probs_2 = tf.exp(self.sample_logprobs_2)
+            self.pair_logprobs = self.sample_logprobs+self.sample_logprobs_2
+            self.pair_probs = tf.exp(self.pair_logprobs)
 
 
             # summaries
