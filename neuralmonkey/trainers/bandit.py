@@ -36,7 +36,7 @@ def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
         loss=-tf.reduce_mean(tf.mul(decoder.sample_logprobs, decoder.rewards),
                              [0, 1]),
         gradients=lambda grad_fun: _scale_gradients(
-            grad_fun(decoder.sample_probs),
+            grad_fun(decoder.sample_logprobs),
             -tf.reduce_mean(
                 decoder.rewards/_clip_probs(decoder.sample_probs, clip_prob))),
         sample_size=k
@@ -67,7 +67,7 @@ def pairwise_xent_objective(decoder, k, clip_prob) -> BanditObjective:
         loss=-tf.reduce_mean(tf.mul(decoder.pair_logprobs,
                                     decoder.rewards), [0, 1]),
         gradients=lambda grad_fun: _scale_gradients(
-            grad_fun(decoder.pair_probs),
+            grad_fun(decoder.pair_logprobs),
             -tf.reduce_mean(
                 decoder.rewards/_clip_probs(decoder.pair_probs, clip_prob))),
         sample_size=k
