@@ -246,7 +246,7 @@ class Decoder(ModelPart):
             self.sample_logprobs_2, sample_ids_2 = self.sample_batch(neg=True)
             self.sample_ids_2 = tf.pack(sample_ids_2)
             self.sample_probs_2 = [tf.exp(lp) for lp in self.sample_logprobs_2]
-            self.pair_logprobs = [i - j for i, j in zip(self.sample_logprobs,
+            self.pair_logprobs = [i+j for i, j in zip(self.sample_logprobs,
                                                         self.sample_logprobs_2)]
             self.pair_probs = [tf.exp(lp) for lp in self.pair_logprobs]
 
