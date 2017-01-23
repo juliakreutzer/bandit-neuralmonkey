@@ -40,55 +40,63 @@ class GenericBanditTrainer(object):
                  binary_feedback=False)\
             -> None:
 
-        self.optimizer = optimizer or tf.train.AdamOptimizer(1e-4)
-        self.objective = objective
+        with tf.name_scope("trainer"):
 
-        self.pairwise = pairwise
-        self.binary_feedback = binary_feedback
+            self.optimizer = optimizer or tf.train.AdamOptimizer(1e-4)
+            self.objective = objective
 
-        with tf.variable_scope('regularization'):
-            regularizable = [v for v in tf.trainable_variables()
-                             if BIAS_REGEX.findall(v.name)]
-            l1_value = sum(tf.reduce_sum(abs(v)) for v in regularizable)
-            l1_cost = l1_weight * l1_value if l1_weight > 0 else tf.constant(0.0)
+            self.pairwise = pairwise
+            self.binary_feedback = binary_feedback
 
-            l2_value = sum(tf.reduce_sum(v ** 2) for v in regularizable)
-            l2_cost = l2_weight * l2_value if l2_weight > 0 else tf.constant(0.0)
+            with tf.variable_scope('regularization'):
+                regularizable = [v for v in tf.trainable_variables()
+                                 if BIAS_REGEX.findall(v.name)]
+                l1_value = sum(tf.reduce_sum(abs(v)) for v in regularizable)
+                l1_cost = l1_weight * l1_value \
+                    if l1_weight > 0 else tf.constant(0.0)
 
-        self.regularizer_cost = l1_cost + l2_cost
-        tf.scalar_summary('train_l1', l1_value, collections=["summary_train"])
-        tf.scalar_summary('train_l2', l2_value, collections=["summary_train"])
+                l2_value = sum(tf.reduce_sum(v ** 2) for v in regularizable)
+                l2_cost = l2_weight * l2_value \
+                    if l2_weight > 0 else tf.constant(0.0)
 
-        # TODO use several objectives
+            self.regularizer_cost = l1_cost + l2_cost
+            tf.scalar_summary('train_l1', l1_value,
+                              collections=["summary_train"])
+            tf.scalar_summary('train_l2', l2_value,
+                              collections=["summary_train"])
 
-        # loss is scalar, avg over batch
-        self.loss = self.objective.loss + self.regularizer_cost
+            # TODO use several objectives
 
-        # compute and apply gradients
-        self.gradients = self.objective.gradients(self._get_gradients)
-        self.reg_gradients = self._get_gradients(self.regularizer_cost)
-        self.minimize = self.optimizer.apply_gradients(
-            _sum_gradients([self.gradients, self.reg_gradients]))
+            # loss is scalar, avg over batch
+            self.loss = self.objective.loss + self.regularizer_cost
 
-        self.all_coders = set.union(collect_encoders(self.objective.decoder))
+            # compute and apply gradients
+            self.gradients = self.objective.gradients(self._get_gradients)
+            self.reg_gradients = self._get_gradients(self.regularizer_cost)
+            self.minimize = self.optimizer.apply_gradients(
+                _sum_gradients([self.gradients, self.reg_gradients]))
 
-        self.clip_norm = clip_norm
+            self.all_coders = set.union(
+                collect_encoders(self.objective.decoder))
 
-        self.sample_op = self.objective.samples, self.objective.sample_logprobs
-        self.update_op = self.optimizer.apply_gradients(self.gradients)
+            self.clip_norm = clip_norm
 
-        with tf.control_dependencies([self.update_op]):
-            self.dummy = tf.constant(0)
+            self.sample_op = self.objective.samples, \
+                             self.objective.sample_logprobs
+            self.update_op = self.optimizer.apply_gradients(self.gradients)
 
-        for grad, var in self.gradients:
-            if grad is not None:
-                tf.histogram_summary('gr_' + var.name,
-                                     grad, collections=["summary_gradients"])
+            with tf.control_dependencies([self.update_op]):
+                self.dummy = tf.constant(0)
 
-        self.histogram_summaries = tf.merge_summary(
-            tf.get_collection("summary_gradients"))
-        self.scalar_summaries = tf.merge_summary(
-            tf.get_collection("summary_train"))
+            for grad, var in self.gradients:
+                if grad is not None:
+                    tf.histogram_summary('gr_' + var.name, grad,
+                                         collections=["summary_gradients"])
+
+            self.histogram_summaries = tf.merge_summary(
+                tf.get_collection("summary_gradients"))
+            self.scalar_summaries = tf.merge_summary(
+                tf.get_collection("summary_train"))
 
     def _get_gradients(self, tensor: tf.Tensor) -> Gradients:
         gradient_list = self.optimizer.compute_gradients(
