@@ -217,8 +217,8 @@ class Decoder(ModelPart):
             self.decoded, self.runtime_logits = decode(
                 self.runtime_rnn_outputs, neg=False)
 
-            _, self.runtime_logits_neg = decode(
-                self.runtime_rnn_outputs, neg=True)
+           # _, self.runtime_logits_neg = decode(
+            #    self.runtime_rnn_outputs, neg=True)
 
             self.runtime_loss = tf.nn.seq2seq.sequence_loss(
                 self.runtime_logits, train_targets,
@@ -227,8 +227,8 @@ class Decoder(ModelPart):
             self.runtime_logprobs = [tf.nn.log_softmax(l)
                                      for l in self.runtime_logits]
 
-            self.runtime_logprobs_neg = [tf.nn.log_softmax(l)
-                                         for l in self.runtime_logits_neg]
+            #self.runtime_logprobs_neg = [tf.nn.log_softmax(l)
+            #                             for l in self.runtime_logits_neg]
 
             # sampling
             self.sample_size = 1  # TODO make param and use
@@ -287,7 +287,7 @@ class Decoder(ModelPart):
 
         # sampling from negative weights of last layer
         if neg:
-            model_logprob = self.runtime_logits_neg
+            model_logprob = [-l for l in self.runtime_logits]  #_neg
 
         for p in model_logprob:  # time steps
 
