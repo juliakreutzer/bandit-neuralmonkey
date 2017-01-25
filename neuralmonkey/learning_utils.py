@@ -399,15 +399,15 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             if len(rewards) <= 3 \
                                     and step % logging_period == 0:
                                 # TODO some evaluators might return error not reward
-                                print("ref: {}\nsample_1: {}\nprob: {}\n{}:"
-                                      " {}\nsample_2: {}\nprob: {}\n{}:"
+                                print("ref: {}\nsample_1: {}\nlogprob: {}\n{}:"
+                                      " {}\nsample_2: {}\nlogprob: {}\n{}:"
                                       " {}".format(" ".join(d), " ".join(s1),
                                                    np.exp(np.sum(p1)),
                                                    function.name, r1,
                                                    " ".join(s2),
                                                    np.exp(np.sum(p2)), function.name,
                                                    r2))  # TODO print nice, only few of them
-                                print("pair reward: {}, diff prob: {}".
+                                print("pair reward: {}, diff logprob: {}".
                                       format(reward, (np.sum(p1)-np.sum(p2))))
 
                 # for objectives with one sample for each sentence
@@ -434,7 +434,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             if len(rewards) <= 3\
                                     and step % logging_period\
                                             == logging_period - 1:
-                                print("ref: {}\nsample: {}\nprob: {}\n{}: {}"
+                                print("ref: {}\nsample: {}\nlogprob: {}\n{}: {}"
                                       .format(" ".join(d), " ".join(s),
                                               np.exp(np.sum(p)), function.name, r))  # TODO print nice, only few of them
 
