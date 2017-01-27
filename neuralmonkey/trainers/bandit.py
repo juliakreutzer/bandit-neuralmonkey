@@ -17,15 +17,15 @@ def expected_loss_objective(decoder, k) -> BanditObjective:
         decoder=decoder,
         samples=decoder.sample_ids,
         sample_logprobs=decoder.sample_logprobs,
-        loss=tf.reduce_mean(tf.mul(decoder.sample_probs, 1-decoder.rewards),
+        loss=tf.reduce_mean(tf.mul(decoder.sample_probs, -decoder.rewards),
                              [0, 1]),
         gradients=lambda grad_fun: grad_fun(
-            tf.mul(decoder.sample_logprobs, 1-decoder.rewards)),
+            tf.mul(decoder.sample_logprobs, -decoder.rewards)),
         sample_size=k
     )
 
 
-def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
+def cross_entropy_objective(decoder, k, clip_prob, factor) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     # TODO use k
     return BanditObjective(
@@ -38,7 +38,7 @@ def cross_entropy_objective(decoder, k, clip_prob) -> BanditObjective:
         gradients=lambda grad_fun: _scale_gradients(
             grad_fun(decoder.sample_logprobs),
             -tf.reduce_mean(
-                decoder.rewards/_clip_probs(decoder.sample_probs, clip_prob))),
+                factor*decoder.rewards/_clip_probs(decoder.sample_probs, clip_prob))),
         sample_size=k
     )
 
@@ -49,14 +49,14 @@ def pairwise_objective(decoder, k) -> BanditObjective:
         decoder=decoder,
         samples=[decoder.sample_ids, decoder.sample_ids_2],
         sample_logprobs=[decoder.sample_logprobs, decoder.sample_logprobs_2],
-        loss=tf.reduce_mean(tf.mul(decoder.pair_probs, 1-decoder.rewards),
+        loss=tf.reduce_mean(tf.mul(decoder.pair_probs, -decoder.rewards),
                              [0, 1]),
         gradients=lambda grad_fun: grad_fun(tf.mul(
-            decoder.pair_logprobs, 1-decoder.rewards)),
+            decoder.pair_logprobs, -decoder.rewards)),
         sample_size=k
     )
 
-def pairwise_xent_objective(decoder, k, clip_prob) -> BanditObjective:
+def pairwise_xent_objective(decoder, k, clip_prob, factor) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     return BanditObjective(
         name="{} - pairwise_xent".format(decoder.name),
@@ -69,7 +69,7 @@ def pairwise_xent_objective(decoder, k, clip_prob) -> BanditObjective:
         gradients=lambda grad_fun: _scale_gradients(
             grad_fun(decoder.pair_logprobs),
             -tf.reduce_mean(
-                decoder.rewards/_clip_probs(decoder.pair_probs, clip_prob))),
+                factor*decoder.rewards/_clip_probs(decoder.pair_probs, clip_prob))),
         sample_size=k
     )
 
@@ -90,8 +90,9 @@ class ExpectedLossTrainer(GenericBanditTrainer):
 class CrossEntropyTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
-                 binary_feedback=False, clip_prob=0.0) -> None:
-        objective = cross_entropy_objective(decoders[0], k, clip_prob=clip_prob)
+                 binary_feedback=False, clip_prob=0.0, factor=1e-10) -> None:
+        objective = cross_entropy_objective(decoders[0], k, clip_prob=clip_prob,
+                                            factor=factor)
         super(CrossEntropyTrainer, self).__init__(
             objective, l1_weight, l2_weight,
             clip_norm=clip_norm,
@@ -113,8 +114,9 @@ class PairwiseTrainer(GenericBanditTrainer):
 class PairwiseXentTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
-                 binary_feedback=False, clip_prob=0.0) -> None:
-        objective = pairwise_xent_objective(decoders[0], k, clip_prob=clip_prob)
+                 binary_feedback=False, clip_prob=0.0, factor=1e-10) -> None:
+        objective = pairwise_xent_objective(decoders[0], k, clip_prob=clip_prob,
+                                            factor=factor)
         super(PairwiseXentTrainer, self).__init__(
             objective, l1_weight, l2_weight,
             clip_norm=clip_norm,
