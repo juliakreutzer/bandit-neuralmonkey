@@ -38,7 +38,7 @@ def cross_entropy_objective(decoder, k, clip_prob, factor) -> BanditObjective:
         gradients=lambda grad_fun: _scale_gradients(
             grad_fun(decoder.sample_logprobs),
             -tf.reduce_mean(
-                factor*decoder.rewards/_clip_probs(decoder.sample_probs, clip_prob))),
+                decoder.rewards/_clip_probs(factor*decoder.sample_probs, clip_prob))),
         sample_size=k
     )
 
@@ -90,7 +90,7 @@ class ExpectedLossTrainer(GenericBanditTrainer):
 class CrossEntropyTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
-                 binary_feedback=False, clip_prob=0.0, factor=1e-10) -> None:
+                 binary_feedback=False, clip_prob=0.0, factor=1e10) -> None:
         objective = cross_entropy_objective(decoders[0], k, clip_prob=clip_prob,
                                             factor=factor)
         super(CrossEntropyTrainer, self).__init__(
