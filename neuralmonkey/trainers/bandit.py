@@ -38,7 +38,7 @@ def cross_entropy_objective(decoder, k, clip_prob, factor) -> BanditObjective:
         gradients=lambda grad_fun: _scale_gradients(
             grad_fun(decoder.sample_logprobs),
             -tf.reduce_mean(
-                decoder.rewards/_clip_probs(factor*decoder.sample_probs, clip_prob))),
+                decoder.rewards/(factor*_clip_probs(decoder.sample_probs, clip_prob)))),
         sample_size=k
     )
 
