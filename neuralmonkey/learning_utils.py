@@ -432,8 +432,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             # TODO no binary version here yet
 
                             if len(rewards) <= 3\
-                                    and step % logging_period\
-                                            == logging_period - 1:
+                                    and step % logging_period == 0:
                                 print("ref: {}\nsample: {}\nlogprob: {}\n{}: {}"
                                       .format(" ".join(d), " ".join(s),
                                               np.exp(np.sum(p)), function.name, r))  # TODO print nice, only few of them
