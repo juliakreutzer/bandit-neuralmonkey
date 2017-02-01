@@ -290,23 +290,31 @@ class Decoder(ModelPart):
             # temps = [-1 for l in self.runtime_logits]
 
             # version 2: negating all logits randomly
-            temps = [tf.sign(tf.random_uniform((1,), -1, 1))
-                     for l in self.runtime_logits]
+            #temps = [tf.sign(tf.random_uniform((1,), -1, 1))
+            #         for l in self.runtime_logits]
 
             # version 3: negating logits only for first word
-            temps = [1 for l in self.runtime_logits]
-            temps[0] = -1
+            #temps = [1 for l in self.runtime_logits]
+            #temps[0] = -1
 
             # version 4: negating logits only for one word, chosen randomly
-            #ix = tf.random_uniform((1,), 0, len(self.runtime_logits), tf.int32)
-            #ixtemp = tf.one_hot(ix, len(self.runtime_logits), on_value=-1., off_value=1.)
-            #temps = tf.unpack(ixtemp, axis=1)
+            ix = tf.random_uniform((1,), 0, len(self.runtime_logits), tf.int32)
+            ixtemp = tf.one_hot(ix, len(self.runtime_logits), on_value=-1., off_value=1.)
+            temps = tf.unpack(ixtemp, axis=1)
 
             # version 5: sample (positive) temperature for every word
             #temps = tf.unpack(tf.random_uniform((len(self.runtime_logits),),
-            #                                    0.01, 1.01, tf.float32))
+            #                                   0.01, 1.01, tf.float32))
 
             model_logprob = [l/n for l,n in zip(self.runtime_logits, temps)]
+
+            # version 6: all the same as first sample
+            #model_logprob = self.runtime_logits
+
+        # TODO version 7: sample once with high temp (1,-> like sample, explore), one with low (0.01, -> like greedy, exploit)
+        #else:
+        #    temps = [0.01 for l in self.runtime_logits]
+        #    model_logprob = model_logprob = [l/n for l,n in zip(self.runtime_logits, temps)]
 
         for p in model_logprob:  # time steps
 
