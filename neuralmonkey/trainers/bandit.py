@@ -49,10 +49,10 @@ def pairwise_objective(decoder, k) -> BanditObjective:
         decoder=decoder,
         samples=[decoder.sample_ids, decoder.sample_ids_2],
         sample_logprobs=[decoder.sample_logprobs, decoder.sample_logprobs_2],
-        loss=tf.reduce_mean(tf.mul(decoder.pair_probs, -decoder.rewards),
+        loss=tf.reduce_mean(tf.mul(decoder.pair_probs, 1-decoder.rewards),
                              [0, 1]),
         gradients=lambda grad_fun: grad_fun(tf.mul(
-            decoder.pair_logprobs, -decoder.rewards)),
+            decoder.pair_logprobs, 1-decoder.rewards)),
         sample_size=k
     )
 
@@ -69,7 +69,7 @@ def pairwise_xent_objective(decoder, k, clip_prob, factor) -> BanditObjective:
         gradients=lambda grad_fun: _scale_gradients(
             grad_fun(decoder.pair_logprobs),
             -tf.reduce_mean(
-                factor*decoder.rewards/_clip_probs(decoder.pair_probs, clip_prob))),
+                decoder.rewards/(factor*_clip_probs(decoder.pair_probs, clip_prob)))),
         sample_size=k
     )
 
