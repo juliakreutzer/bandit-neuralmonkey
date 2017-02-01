@@ -287,7 +287,20 @@ class Decoder(ModelPart):
 
         # sampling from negative weights of last layer
         if neg:
-            model_logprob = [-l for l in self.runtime_logits]  #_neg
+
+            # version 1: negating all logits
+            # temps = [-1 for l in self.runtime_logits]
+
+            # version 2: negating all logits randomly
+            temps = [tf.sign(tf.random_uniform((1,), -1, 1))
+                     for l in self.runtime_logits]
+
+            # version 3: negating logits only for first word
+            # TODO
+            # version 4: negating logits onyl for one word, chosen randomly
+            # TODO
+
+            model_logprob = [l*n for l,n in zip(self.runtime_logits, temps)]
 
         for p in model_logprob:  # time steps
 
