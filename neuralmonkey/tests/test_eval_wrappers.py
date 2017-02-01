@@ -5,9 +5,10 @@ import unittest
 from neuralmonkey.evaluators.multeval import MultEvalWrapper
 from neuralmonkey.evaluators.beer import BeerWrapper
 from neuralmonkey.evaluators.bleu import BLEUEvaluator
+from neuralmonkey.evaluators.gleu import GLEUEvaluator
 
-ref = "I like tulips ."
-hyp = "I hate flowers and stones ."
+ref = ["I", "like", "tulips", "."]
+hyp = ["I", "hate", "flowers", "and", "stones", "."]
 
 class TestExternalEvaluators(unittest.TestCase):
 
@@ -74,6 +75,18 @@ class TestExternalEvaluators(unittest.TestCase):
         self.assertGreater(max_beer, min_beer)
         self.assertGreater(beer, min_beer)
         self.assertGreaterEqual(max_beer, beer)
+
+    def test_gleu(self):
+        gleu_evaluator = GLEUEvaluator()
+        gleu = gleu_evaluator([hyp], [ref])
+        print("NM GLEU: {}".format(gleu))
+        max_gleu = gleu_evaluator([ref], [ref])
+        print("NM GLEU max: {}".format(max_gleu))
+        min_gleu = gleu_evaluator([], [ref])
+        print("NM GLEU min: {}".format(min_gleu))
+        self.assertGreater(max_gleu, min_gleu)
+        self.assertGreater(gleu, min_gleu)
+        self.assertGreaterEqual(max_gleu, gleu)
 
 
 if __name__ == "__main__":
