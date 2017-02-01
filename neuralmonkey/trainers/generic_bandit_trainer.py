@@ -89,6 +89,8 @@ class GenericBanditTrainer(object):
 
             self.sample_op = self.objective.samples, \
                              self.objective.sample_logprobs
+            self.greedy_op = self.objective.decoder.decoded
+
             self.update_op = self.optimizer.apply_gradients(
                 _sum_gradients([self.gradients, self.reg_gradients]))
 
@@ -124,6 +126,7 @@ class GenericBanditTrainer(object):
         else:
             return SampleBanditExecutable(self.all_coders,
                                           self.sample_op,
+                                          self.greedy_op,
                                           self.regularizer_cost,
                                           None,  # no summaries yet
                                           None)
@@ -210,10 +213,11 @@ class UpdateBanditExecutable(BanditExecutable):
 
 class SampleBanditExecutable(BanditExecutable):
 
-    def __init__(self, all_coders, sample_op, regularization_cost,
+    def __init__(self, all_coders, sample_op, greedy_op, regularization_cost,
                  scalar_summaries, histogram_summaries):
         self.all_coders = all_coders
         self.sample_op = sample_op
+        self.greedy_op = greedy_op
         self.scalar_summaries = scalar_summaries
         self.histogram_summaries = histogram_summaries
         self.regularization_cost = regularization_cost
@@ -222,6 +226,7 @@ class SampleBanditExecutable(BanditExecutable):
 
     def next_to_execute(self, reward=None) -> NextExecute:
         fetches = {'sample_op': self.sample_op}
+        fetches["greedy_op"] = self.greedy_op
         if self.scalar_summaries is not None:
             fetches['scalar_summaries'] = self.scalar_summaries
             fetches['histogram_summaries'] = self.histogram_summaries
@@ -238,8 +243,9 @@ class SampleBanditExecutable(BanditExecutable):
             histogram_summaries = results[0]['histogram_summaries']
 
         sampled_outputs, sampled_logprobs = results[0]['sample_op']
+        greedy_outputs = results[0]['greedy_op']
         reg_cost = results[0]['reg_cost']
-        outputs = sampled_outputs, sampled_logprobs, reg_cost  # TODO make summaries for these values
+        outputs = sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost  # TODO make summaries for these values
         self.result = BanditExecutionResult(
             [outputs], loss=None,
             scalar_summaries=scalar_summaries,
@@ -249,8 +255,10 @@ class SampleBanditExecutable(BanditExecutable):
     def get_fetches(self):
         fetches = [self.regularization_cost]
         samples, logprobs = self.sample_op
+        greedy = self.greedy_op
         fetches.append(samples)
         fetches.append(logprobs)
+        fetches.append(greedy)
         if self.scalar_summaries is not None:
             fetches.extend(self.scalar_summaries)
         if self.histogram_summaries is not None:

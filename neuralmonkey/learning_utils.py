@@ -353,8 +353,11 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 sampling_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=False,
                     summaries=True, rewards=None)
-                sampled_outputs, sampled_logprobs, reg_cost = \
+                sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost = \
                     sampling_result[0].outputs[0]
+
+                sentences_greedy = trainer.objective.decoder.vocabulary. \
+                    vectors_to_sentences(greedy_outputs)
 
                 # sampled_outputs: batch x max_len x sample_size (now 1)
 
@@ -373,17 +376,18 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                     sentences_2 = trainer.objective.decoder.vocabulary. \
                         vectors_to_sentences(sample_arrays_2)
 
+
                     logprobs_1, logprobs_2 = sampled_logprobs
 
                     dataset_id, function = trainer.evaluator
 
                     desired_output = batch_dataset.get_series(dataset_id)
 
-                    for d, s1, s2, p1, p2 in zip(desired_output, sentences_1,
-                                       sentences_2, logprobs_1, logprobs_2):
+                    for d, g, s1, s2, p1, p2 in zip(desired_output,
+                                                    sentences_greedy,
+                                                    sentences_1, sentences_2,
+                                                    logprobs_1, logprobs_2):
 
-                        print(s1)
-                        print(d)
                         r1 = function([s1], [d])
                         r2 = function([s2], [d])
 
@@ -398,19 +402,26 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                         rewards.append(reward)
 
-                        if len(rewards) <= 3 \
+                        i = 1
+                        if len(rewards) <= 5 \
                                 and step % logging_period == 0:
                             # TODO some evaluators might return error not reward
-                            debug("ref: {}\nsample_1: {}\nlogprob: {}\n{}:"
-                                  " {}\nsample_2: {}\nlogprob: {}\n{}:"
-                                  " {}".format(" ".join(d), " ".join(s1),
-                                               np.exp(np.sum(p1)),
-                                               function.name, r1,
-                                               " ".join(s2),
-                                               np.exp(np.sum(p2)), function.name,
-                                               r2))
-                            debug("pair reward: {}, diff logprob: {}".
+                            log("[Example {}]\nref: {}\ngreedy: {}\nsample_1: {}"
+                                "\nlogprob: {}\n{}: {}\nsample_2: {}"
+                                "\nlogprob: {}\n{}: {}".format(i,
+                                                           " ".join(d),
+                                                           " ".join(g),
+                                                           " ".join(s1),
+                                                           np.exp(np.sum(p1)),
+                                                           function.name,
+                                                           r1,
+                                                           " ".join(s2),
+                                                           np.exp(np.sum(p2)),
+                                                           function.name,
+                                                           r2))
+                            log("pair reward: {}, diff logprob: {}".
                                   format(reward, (np.sum(p1)-np.sum(p2))))
+                            i += 1
 
                 # for objectives with one sample for each sentence
                 else:
@@ -426,18 +437,24 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                     desired_output = batch_dataset.get_series(dataset_id)
 
-                    for d, s, p in zip(desired_output, sentences,
-                                       sampled_logprobs):
+                    i = 1
+                    for d, g, s, p in zip(desired_output, sentences_greedy,
+                                          sentences, sampled_logprobs):
                         r = function([s], [d])
                         rewards.append(r)
 
                         # TODO no binary version here yet
 
-                        if len(rewards) <= 3\
+                        if len(rewards) <= 5\
                                 and step % logging_period == 0:
-                            debug("ref: {}\nsample: {}\nlogprob: {}\n{}: {}"
-                                  .format(" ".join(d), " ".join(s),
-                                          np.exp(np.sum(p)), function.name, r))
+                            log("[Example {}]\nref: {}\ngreedy: {}\nsample: "
+                                "{}\nlogprob: {}\n{}: {}".format(i,
+                                                     " ".join(d),
+                                                     " ".join(g),
+                                                     " ".join(s),
+                                                     np.exp(np.sum(p)),
+                                                     function.name, r))
+                            i += 1
 
                 # update model with samples and their rewards
                 summaries_bool = step % logging_period == logging_period - 1
@@ -448,7 +465,9 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                     summaries=summaries_bool, rewards=rewards, train=True
                 )
 
-                log("loss: {}".format(update_result[0].loss), color='red')
+                if step % logging_period == 0:
+                    log("loss: {}".format(update_result[0].loss), color='red')
+
 
                 if step % logging_period == logging_period - 1:
                     train_results, train_outputs = run_on_dataset(
