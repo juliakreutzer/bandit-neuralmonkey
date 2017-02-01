@@ -76,48 +76,48 @@ def pairwise_xent_objective(decoder, k, clip_prob, factor) -> BanditObjective:
 
  # FIXME only 1 decoder/objective so far for ALL bandit objectives
 class ExpectedLossTrainer(GenericBanditTrainer):
-    def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
+    def __init__(self, decoders: List[Any], evaluator, l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
                  binary_feedback=False) -> None:
         objective = expected_loss_objective(decoders[0], k)
         super(ExpectedLossTrainer, self).__init__(
-            objective, l1_weight, l2_weight,
+            objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=False,
             binary_feedback=binary_feedback)
 
 
 class CrossEntropyTrainer(GenericBanditTrainer):
-    def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
+    def __init__(self, decoders: List[Any], evaluator, l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
                  binary_feedback=False, clip_prob=0.0, factor=1e10) -> None:
         objective = cross_entropy_objective(decoders[0], k, clip_prob=clip_prob,
                                             factor=factor)
         super(CrossEntropyTrainer, self).__init__(
-            objective, l1_weight, l2_weight,
+            objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=False,
             binary_feedback=binary_feedback)
 
 
 class PairwiseTrainer(GenericBanditTrainer):
-    def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
+    def __init__(self, decoders: List[Any], evaluator, l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
                  binary_feedback=False) -> None:
         objective = pairwise_objective(decoders[0], k)
         super(PairwiseTrainer, self).__init__(
-            objective, l1_weight, l2_weight,
+            objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=True, binary_feedback=binary_feedback)
 
 
 class PairwiseXentTrainer(GenericBanditTrainer):
-    def __init__(self, decoders: List[Any], l1_weight=0., l2_weight=0.,
+    def __init__(self, decoders: List[Any], evaluator, l1_weight=0., l2_weight=0.,
                  clip_norm=False, optimizer=None, k=1,
                  binary_feedback=False, clip_prob=0.0, factor=1e-10) -> None:
         objective = pairwise_xent_objective(decoders[0], k, clip_prob=clip_prob,
                                             factor=factor)
         super(PairwiseXentTrainer, self).__init__(
-            objective, l1_weight, l2_weight,
+            objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=True, binary_feedback=binary_feedback)

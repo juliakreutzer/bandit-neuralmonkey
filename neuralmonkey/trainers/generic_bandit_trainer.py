@@ -34,7 +34,7 @@ class GenericBanditTrainer(object):
     # FIXME
     # only one objective for now
 
-    def __init__(self, objective: BanditObjective,
+    def __init__(self, objective: BanditObjective, evaluator,
                  l1_weight=0.0, l2_weight=0.0,
                  clip_norm=False, optimizer=None, pairwise=False,
                  binary_feedback=False)\
@@ -47,6 +47,8 @@ class GenericBanditTrainer(object):
 
             self.pairwise = pairwise
             self.binary_feedback = binary_feedback
+
+            self.evaluator = evaluator
 
             with tf.variable_scope('regularization'):
                 regularizable = [v for v in tf.trainable_variables()

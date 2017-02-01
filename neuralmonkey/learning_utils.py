@@ -263,7 +263,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
     Args:
         tf_manager: TensorFlowManager with initialized sessions.
-        epochs: Number of epochs for which the algoritm will learn.
+        epochs: Number of epochs for which the algorithm will learn.
         trainer: The trainer object containg the TensorFlow code for computing
             the loss and optimization operation.
         train_dataset:
@@ -375,40 +375,42 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                     logprobs_1, logprobs_2 = sampled_logprobs
 
-                    for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
+                    dataset_id, function = trainer.evaluator
 
-                        desired_output = batch_dataset.get_series(dataset_id)
+                    desired_output = batch_dataset.get_series(dataset_id)
 
-                        for d, s1, s2, p1, p2 in zip(desired_output, sentences_1,
-                                           sentences_2, logprobs_1, logprobs_2):
+                    for d, s1, s2, p1, p2 in zip(desired_output, sentences_1,
+                                       sentences_2, logprobs_1, logprobs_2):
 
-                            r1 = function(s1, d)
-                            r2 = function(s2, d)
+                        print(s1)
+                        print(d)
+                        r1 = function([s1], [d])
+                        r2 = function([s2], [d])
 
-                            # TODO different pairwise reward definitions
+                        # TODO different pairwise reward definitions
 
-                            # binary
-                            if trainer.binary_feedback:
-                                reward = 1. if r1 > r2 else 0.
-                            # continuous
-                            else:
-                                reward = r1-r2
+                        # binary
+                        if trainer.binary_feedback:
+                            reward = 1. if r1 > r2 else 0.
+                        # continuous
+                        else:
+                            reward = r1-r2
 
-                            rewards.append(reward)
+                        rewards.append(reward)
 
-                            if len(rewards) <= 3 \
-                                    and step % logging_period == 0:
-                                # TODO some evaluators might return error not reward
-                                debug("ref: {}\nsample_1: {}\nlogprob: {}\n{}:"
-                                      " {}\nsample_2: {}\nlogprob: {}\n{}:"
-                                      " {}".format(" ".join(d), " ".join(s1),
-                                                   np.exp(np.sum(p1)),
-                                                   function.name, r1,
-                                                   " ".join(s2),
-                                                   np.exp(np.sum(p2)), function.name,
-                                                   r2))  # TODO print nice, only few of them
-                                debug("pair reward: {}, diff logprob: {}".
-                                      format(reward, (np.sum(p1)-np.sum(p2))))
+                        if len(rewards) <= 3 \
+                                and step % logging_period == 0:
+                            # TODO some evaluators might return error not reward
+                            debug("ref: {}\nsample_1: {}\nlogprob: {}\n{}:"
+                                  " {}\nsample_2: {}\nlogprob: {}\n{}:"
+                                  " {}".format(" ".join(d), " ".join(s1),
+                                               np.exp(np.sum(p1)),
+                                               function.name, r1,
+                                               " ".join(s2),
+                                               np.exp(np.sum(p2)), function.name,
+                                               r2))
+                            debug("pair reward: {}, diff logprob: {}".
+                                  format(reward, (np.sum(p1)-np.sum(p2))))
 
                 # for objectives with one sample for each sentence
                 else:
@@ -420,22 +422,22 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         vectors_to_sentences(sample_arrays)  # FIXME ugly
 
                     # evaluate samples
-                    for generated_id, dataset_id, function in evaluators:  # TODO bandit with multiple evaluators?
+                    dataset_id, function = trainer.evaluator
 
-                        desired_output = batch_dataset.get_series(dataset_id)
+                    desired_output = batch_dataset.get_series(dataset_id)
 
-                        for d, s, p in zip(desired_output, sentences,
-                                           sampled_logprobs):
-                            r = function(s, d)
-                            rewards.append(r)
+                    for d, s, p in zip(desired_output, sentences,
+                                       sampled_logprobs):
+                        r = function([s], [d])
+                        rewards.append(r)
 
-                            # TODO no binary version here yet
+                        # TODO no binary version here yet
 
-                            if len(rewards) <= 3\
-                                    and step % logging_period == 0:
-                                debug("ref: {}\nsample: {}\nlogprob: {}\n{}: {}"
-                                      .format(" ".join(d), " ".join(s),
-                                              np.exp(np.sum(p)), function.name, r))  # TODO print nice, only few of them
+                        if len(rewards) <= 3\
+                                and step % logging_period == 0:
+                            debug("ref: {}\nsample: {}\nlogprob: {}\n{}: {}"
+                                  .format(" ".join(d), " ".join(s),
+                                          np.exp(np.sum(p)), function.name, r))
 
                 # update model with samples and their rewards
                 summaries_bool = step % logging_period == logging_period - 1
