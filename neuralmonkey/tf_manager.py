@@ -1,7 +1,10 @@
-"""Interface between the data and TF session.
+"""==================
+TensorFlow Manager
+==================
 
-This module impelements the TensorFlow manager which encapsulates the graph
-execution in existing sessions.
+TensorFlow manager is a helper object in Neural Monkey which manages TensorFlow
+sessions, execution of the computation graph, and saving and restoring of model
+variables.
 
 """
 
@@ -10,13 +13,12 @@ from typing import Any, List, Union
 # pylint: enable=unused-import
 
 import tensorflow as tf
+from typeguard import check_argument_types
+
 from neuralmonkey.logging import log
 from neuralmonkey.dataset import Dataset
-
 from neuralmonkey.runners.base_runner import (ExecutionResult,
                                               reduce_execution_results)
-
-# tests: pylint,mypy
 
 
 class TensorFlowManager(object):
@@ -45,6 +47,8 @@ class TensorFlowManager(object):
             report_gpu_memory_consumption: Report overall GPU memory at every
                 logging
         """
+
+        assert check_argument_types()
 
         session_cfg = tf.ConfigProto()
         session_cfg.inter_op_parallelism_threads = num_threads

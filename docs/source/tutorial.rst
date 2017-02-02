@@ -56,7 +56,7 @@ source sentence was. The second view regards this as an ordinary machine
 translation task, with a little help from another MT system.
 
 In our tutorial, we will assume the MT system used to produce the sentence
-``e'`` was good enough. We thus generally trust it and expect only to make 
+``e'`` was good enough. We thus generally trust it and expect only to make
 small edits to the
 translated sentence in order to make it fully correct. This means that we don't need
 to train a whole new MT system that would translate the source sentences from
@@ -226,13 +226,13 @@ The configuration of the datasets looks like this:
 .. code-block:: ini
 
   [train_dataset]
-  class=config.utils.dataset_from_files
+  class=dataset.load_dataset_from_files
   s_source="exp-nm-ape/data/train/train.src"
   s_translated="exp-nm-ape/data/train/train.mt"
   s_edits="exp-nm-ape/data/train/train.edits"
 
   [val_dataset]
-  class=config.utils.dataset_from_files
+  class=dataset.load_dataset_from_files
   s_source="exp-nm-ape/data/dev/dev.src"
   s_translated="exp-nm-ape/data/dev/dev.mt"
   s_edits="exp-nm-ape/data/dev/dev.edits"
@@ -589,7 +589,7 @@ configuration. We will call this file ``post-edit_run.ini``:
   test_datasets=[<eval_data>]
 
   [eval_data]
-  class=config.utils.dataset_from_files
+  class=dataset.load_dataset_from_files
   s_source="exp-nm-ape/data/test/test.src"
   s_translated="exp-nm-ape/data/test/test.mt"
   s_greedy_edits_out="exp-nm-ape/test_output.edits"
@@ -653,8 +653,9 @@ editing one of those examples as well.
 
 If you want to dig in the code, you can browse the `repository
 <https://github.com/ufal/neuralmonkey>`_ Please feel free to fork the repository
-and to send us pull requests. The `API
-manual <http://neural-monkey.readthedocs.io/>`_ is currently under construction,
-but it should contain something very soon.
+and to send us pull requests. The `API documentation
+<http://neural-monkey.readthedocs.io/>`_ is currently under construction, but it
+already contains a little information about Neural Monkey objects and their
+configuraiton options.
 
 Have fun!

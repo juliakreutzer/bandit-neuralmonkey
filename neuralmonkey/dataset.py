@@ -1,156 +1,17 @@
 """ Implementation of the dataset class. """
-# tests: lint, mypy
+
 import random
 import re
 import collections
 
-from typing import Any, List, Callable, Iterable, Dict, Tuple
+from typing import cast, Any, List, Callable, Iterable, Dict, Tuple, Union
 
 import numpy as np
+from typeguard import check_argument_types
 
 from neuralmonkey.logging import log
 from neuralmonkey.readers.utils import Reader
 from neuralmonkey.readers.plain_text_reader import UtfPlainTextReader
-
-SERIES_SOURCE = re.compile("s_([^_]*)$")
-SERIES_OUTPUT = re.compile("s_(.*)_out")
-
-
-def load_dataset_from_files(
-        name: str=None, lazy: bool=False,
-        preprocessors: List[Tuple[str, str, Callable]]=None,
-        **kwargs: str) -> 'Dataset':
-    """Load a dataset from the files specified by the provided arguments.
-    Paths to the data are provided in a form of dictionary.
-
-    Keyword arguments:
-        name: The name of the dataset to use. If None (default), the name will
-              be inferred from the file names.
-        lazy: Boolean flag specifying whether to use lazy loading (useful for
-              large files). Note that the lazy dataset cannot be shuffled.
-              Defaults to False.
-        preprocessor: A callable used for preprocessing of the input sentences.
-        kwargs: Dataset keyword argument specs. These parameters should begin
-                with 's_' prefix and may end with '_out' suffix.  For example,
-                a data series 'source' which specify the source sentences
-                should be initialized with the 's_source' parameter, which
-                specifies the path and optinally reader of the source file. If
-                runners generate data of the 'target' series, the output file
-                should be initialized with the 's_target_out' parameter.
-                Series identifiers should not contain underscores.
-
-    Returns:
-        The newly created dataset.
-
-    Raises:
-        Exception when no input files are provided.
-    """
-    series_paths_and_readers = _get_series_paths_and_readers(kwargs)
-    series_outputs = _get_series_outputs(kwargs)
-
-    if not series_paths_and_readers:
-        raise Exception("No input files are provided.")
-
-    log("Initializing dataset with: {}".format(
-        ", ".join(series_paths_and_readers)))
-
-    if name is None:
-        name = _get_name_from_paths(series_paths_and_readers)
-
-    if lazy:
-        return LazyDataset(name, series_paths_and_readers, series_outputs,
-                           preprocessors)
-
-    series = {key: list(reader(paths))
-              for key, (paths, reader) in series_paths_and_readers.items()}
-
-    if preprocessors is not None:
-        for src_id, tgt_id, function in preprocessors:
-            if src_id == tgt_id:
-                raise Exception(
-                    "Attempt to rewrite series '{}'".format(src_id))
-            if src_id not in series:
-                raise Exception(
-                    ("The source series ({}) of the '{}' preprocessor "
-                     "is not defined in the dataset.").format(
-                         src_id, function.__name__))
-            series[tgt_id] = list(map(function, series[src_id]))
-
-    dataset = Dataset(name, series, series_outputs)
-    log("Dataset length: {}".format(len(dataset)))
-
-    return dataset
-
-
-def _get_name_from_paths(series_paths: Dict[str, Tuple[List[str],
-                                                       Reader]]) -> str:
-    """Construct name for a dataset using the paths to its files.
-
-    Arguments:
-        series_paths: A dictionary which maps serie names to the paths
-                      of their input files.
-
-    Returns:
-        The name for the dataset.
-    """
-
-    name = "dataset"
-    for paths, _ in series_paths.values():
-        name += "-{}".format("+".join(paths))
-    return name
-
-
-def _get_series_paths_and_readers(
-        kwargs: Dict[str, Any]) -> Dict[str, Tuple[List[str], Reader]]:
-    """Get paths to files that contain data from the dataset kwargs.
-
-    Input file for a serie named 'xxx' is specified by parameter 's_xxx'. The
-    dataset series is defined by a string with a path / list of strings with
-    paths, or a tuple whose first member is a path or a list of paths and the
-    second memeber is a reader function.
-
-    Arguments:
-        kwargs: A dictionary containing the dataset keyword argument specs.
-
-    Returns:
-        A dictionary which maps serie names to the paths of their input files
-        and readers..
-    """
-    keys = [k for k in list(kwargs.keys()) if SERIES_SOURCE.match(k)]
-    names = [SERIES_SOURCE.match(k).group(1) for k in keys]
-
-    series_sources = {}
-    for name, key in zip(names, keys):
-        value = kwargs[key]
-
-        if isinstance(value, tuple):
-            paths = value[0]
-            reader = value[1]
-        else:
-            paths = value
-            reader = UtfPlainTextReader
-
-        if isinstance(paths, str):
-            paths = [paths]
-
-        series_sources[name] = (paths, reader)
-
-    return series_sources
-
-
-def _get_series_outputs(kwargs: Dict[str, str]) -> Dict[str, str]:
-    """Get paths to series outputs from the dataset keyword argument specs.
-    Output file for a series named 'xxx' is specified by parameter 's_xxx_out'
-
-    Arguments:
-        kwargs: A dictionary containing the dataset keyword argument specs.
-
-    Returns:
-        A dictionary which maps serie names to the paths for their output
-        files.
-    """
-    return {SERIES_OUTPUT.match(key).group(1): value
-            for key, value in kwargs.items() if SERIES_OUTPUT.match(key)}
 
 
 class Dataset(collections.Sized):
@@ -285,6 +146,12 @@ class Dataset(collections.Sized):
             batch_index += 1
             yield dataset
 
+    def add_series(self, name: str, series: List[Any]) -> None:
+        if name in self._series:
+            raise ValueError(
+                "Can't series that already exist: {}".format(name))
+        self._series[name] = series
+
 
 class LazyDataset(Dataset):
     """Implements the lazy dataset.
@@ -395,3 +262,198 @@ class LazyDataset(Dataset):
     def series_ids(self) -> Iterable[str]:
         return (list(self.series_paths_and_readers.keys()) +
                 list(self.preprocess_series.keys()))
+
+    def add_series(self, name: str, series: Iterable[Any]) -> None:
+        raise NotImplementedError(
+            "Lazy dataset does not support adding series.")
+
+
+# pylint: disable=invalid-name
+DatasetPreprocess = Callable[[Dataset], Iterable[Any]]
+DatasetPostprocess = Callable[[Dataset, Dict[str, Iterable[Any]]],
+                              Iterable[Any]]
+ReaderDef = Union[str, List[str],
+                  Tuple[str, Reader], Tuple[List[str], Reader]]
+SeriesConfig = Dict[str, Union[ReaderDef, DatasetPreprocess]]
+# pylint: enable=invalid-name
+
+SERIES_SOURCE = re.compile("s_([^_]*)$")
+SERIES_OUTPUT = re.compile("s_(.*)_out")
+PREPROCESSED_SERIES = re.compile("pre_([^_]*)$")
+
+
+def load_dataset_from_files(
+        name: str=None, lazy: bool=False,
+        preprocessors: List[Tuple[str, str, Callable]]=None,
+        **kwargs) -> Dataset:
+
+    """Load a dataset from the files specified by the provided arguments.
+    Paths to the data are provided in a form of dictionary.
+
+    Keyword arguments:
+        name: The name of the dataset to use. If None (default), the name will
+              be inferred from the file names.
+        lazy: Boolean flag specifying whether to use lazy loading (useful for
+              large files). Note that the lazy dataset cannot be shuffled.
+              Defaults to False.
+        preprocessor: A callable used for preprocessing of the input sentences.
+        kwargs: Dataset keyword argument specs. These parameters should begin
+                with 's_' prefix and may end with '_out' suffix.  For example,
+                a data series 'source' which specify the source sentences
+                should be initialized with the 's_source' parameter, which
+                specifies the path and optinally reader of the source file. If
+                runners generate data of the 'target' series, the output file
+                should be initialized with the 's_target_out' parameter.
+                Series identifiers should not contain underscores.
+                Dataset-level preprocessors are defined with 'pre_' prefix
+                followed by a new series name. In case of the pre-processed
+                series, a callable taking the dataset and returning a new
+                series is expected as a value.
+    Returns:
+        The newly created dataset.
+
+    Raises:
+        Exception when no input files are provided.
+    """
+
+    assert check_argument_types()
+
+    series_paths_and_readers = _get_series_paths_and_readers(kwargs)
+    series_outputs = _get_series_outputs(kwargs)
+
+    if not series_paths_and_readers:
+        raise Exception("No input files are provided.")
+
+    log("Initializing dataset with: {}".format(
+        ", ".join(series_paths_and_readers)))
+
+    if name is None:
+        name = _get_name_from_paths(series_paths_and_readers)
+
+    if lazy:
+        dataset = LazyDataset(name, series_paths_and_readers, series_outputs,
+                              preprocessors)
+        # type: Dataset
+    else:
+        series = {key: list(reader(paths))
+                  for key, (paths, reader) in series_paths_and_readers.items()}
+
+        if preprocessors is not None:
+            for src_id, tgt_id, function in preprocessors:
+                if src_id == tgt_id:
+                    raise Exception(
+                        "Attempt to rewrite series '{}'".format(src_id))
+                if src_id not in series:
+                    raise Exception(
+                        ("The source series ({}) of the '{}' preprocessor "
+                         "is not defined in the dataset.").format(
+                             src_id, function.__name__))
+                series[tgt_id] = list(map(function, series[src_id]))
+
+        # pylint: disable=redefined-variable-type
+        dataset = Dataset(name, series, series_outputs)
+        # pylint: enable=redefined-variable-type
+        log("Dataset length: {}".format(len(dataset)))
+
+    _preprocessed_datasets(dataset, kwargs)
+
+    return dataset
+
+
+def _get_name_from_paths(series_paths: Dict[str, Tuple[List[str],
+                                                       Reader]]) -> str:
+    """Construct name for a dataset using the paths to its files.
+
+    Arguments:
+        series_paths: A dictionary which maps serie names to the paths
+                      of their input files.
+
+    Returns:
+        The name for the dataset.
+    """
+
+    name = "dataset"
+    for paths, _ in series_paths.values():
+        name += "-{}".format("+".join(paths))
+    return name
+
+
+def _get_series_paths_and_readers(
+        series_config: SeriesConfig) -> Dict[str, Tuple[List[str], Reader]]:
+    """Get paths to files that contain data from the dataset kwargs.
+
+    Input file for a serie named 'xxx' is specified by parameter 's_xxx'. The
+    dataset series is defined by a string with a path / list of strings with
+    paths, or a tuple whose first member is a path or a list of paths and the
+    second memeber is a reader function.
+
+    Arguments:
+        series_config: A dictionary containing the dataset keyword argument
+            specs.
+
+    Returns:
+        A dictionary which maps serie names to the paths of their input files
+        and readers..
+    """
+    keys = [k for k in list(series_config.keys()) if SERIES_SOURCE.match(k)]
+    names = [SERIES_SOURCE.match(k).group(1) for k in keys]
+
+    series_sources = {}
+    for name, key in zip(names, keys):
+        value = cast(ReaderDef, series_config[key])
+
+        if isinstance(value, tuple):
+            paths, reader = value  # type: ignore
+        else:
+            paths = value
+            reader = UtfPlainTextReader
+
+        if isinstance(paths, str):
+            paths = [paths]
+
+        series_sources[name] = (paths, reader)
+
+    return series_sources
+
+
+def _get_series_outputs(series_config: SeriesConfig) -> Dict[str, str]:
+    """Get paths to series outputs from the dataset keyword argument specs.
+    Output file for a series named 'xxx' is specified by parameter 's_xxx_out'
+
+    Arguments:
+        series_config: A dictionary containing the dataset keyword argument
+           specs.
+
+    Returns:
+        A dictionary which maps serie names to the paths for their output
+        files.
+    """
+    outputs = {}
+    for key, value in series_config.items():
+        matcher = SERIES_OUTPUT.match(key)
+        if matcher:
+            name = matcher.group(1)
+            if not isinstance(value, str):
+                raise ValueError(
+                    "Output path for '{}' series must be a string, was {}.".
+                    format(name, type(value)))
+            outputs[name] = cast(str, value)
+    return outputs
+
+
+def _preprocessed_datasets(
+        dataset: Dataset,
+        series_config: SeriesConfig) -> None:
+    """Apply dataset-level preprocessing."""
+    keys = [key for key in series_config.keys()
+            if PREPROCESSED_SERIES.match(key)]
+
+    for key in keys:
+        name = PREPROCESSED_SERIES.match(key).group(1)
+        preprocessor = cast(DatasetPreprocess, series_config[key])
+
+        if isinstance(dataset, Dataset):
+            new_series = list(preprocessor(dataset))
+            dataset.add_series(name, new_series)
+        elif isinstance(dataset, LazyDataset):
+            dataset.preprocess_series[name] = (None, preprocessor)

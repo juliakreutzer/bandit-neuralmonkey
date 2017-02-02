@@ -1,4 +1,6 @@
 # tests: lint, mypy
+# pylint: disable=too-many-lines
+# There are too many lines because of these pylint directives.
 
 from typing import Any, Callable, Dict, List, Tuple, Optional, Union
 import os
@@ -10,19 +12,22 @@ from neuralmonkey.logging import log, log_print
 from neuralmonkey.dataset import Dataset
 from neuralmonkey.tf_manager import TensorFlowManager
 from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
-
+from neuralmonkey.trainers.generic_trainer import GenericTrainer
 from neuralmonkey.tf_utils import gpu_memusage
 
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
-EvalConfiguration = List[Union[Tuple[str, Any], Tuple[str, str, Any]]]
+SeriesName = str
+EvalConfiguration = List[Union[Tuple[SeriesName, Any],
+                               Tuple[SeriesName, SeriesName, Any]]]
+Postprocess = Optional[List[Tuple[SeriesName, Callable]]]
 # pylint: enable=invalid-name
 
 
 # pylint: disable=too-many-arguments, too-many-locals, too-many-branches
 def training_loop(tf_manager: TensorFlowManager,
                   epochs: int,
-                  trainer: BaseRunner,  # TODO better annotate
+                  trainer: GenericTrainer,  # TODO better annotate
                   batch_size: int,
                   train_dataset: Dataset,
                   val_dataset: Dataset,
@@ -34,8 +39,11 @@ def training_loop(tf_manager: TensorFlowManager,
                   vars_prefix="/tmp/variables.data",
                   logging_period: int=20,
                   validation_period: int=500,
+                  val_preview_input_series: Optional[List[str]]=None,
+                  val_preview_output_series: Optional[List[str]]=None,
+                  val_preview_num_examples: int=15,
                   runners_batch_size: Optional[int]=None,
-                  postprocess: Callable=None,
+                  postprocess: Postprocess=None,
                   minimize_metric: bool=False):
 
     # TODO finish the list
@@ -59,10 +67,16 @@ def training_loop(tf_manager: TensorFlowManager,
             the evaluation function. If only one series names is provided, it
             means the generated and dataset series have the same name.
     """
-
     if validation_period < logging_period:
         raise AssertionError(
             "Logging period can't smaller than validation period.")
+    _check_series_collisions(runners, postprocess)
+
+    paramstr = "Model has {} trainable parameters".format(trainer.n_parameters)
+    if tf_manager.report_gpu_memory_consumption:
+        paramstr += ", GPU memory usage: {}".format(gpu_memusage())
+
+    log(paramstr)
 
     # TODO DOCUMENT_THIS
     if runners_batch_size is None:
@@ -92,7 +106,7 @@ def training_loop(tf_manager: TensorFlowManager,
         saved_scores = [-np.inf for _ in range(save_n_best_vars)]
         best_score = -np.inf
 
-    tf_manager.initialize_model_parts(runners + [trainer])
+    tf_manager.initialize_model_parts(runners + [trainer])  # type: ignore
     tf_manager.save(variables_files[0])
 
     if os.path.islink(link_best_vars):
@@ -119,7 +133,6 @@ def training_loop(tf_manager: TensorFlowManager,
             train_batched_datasets = train_dataset.batch_dataset(batch_size)
 
             for batch_n, batch_dataset in enumerate(train_batched_datasets):
-
                 step += 1
                 seen_instances += len(batch_dataset)
                 if step % logging_period == logging_period - 1:
@@ -129,6 +142,9 @@ def training_loop(tf_manager: TensorFlowManager,
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
                         postprocess, write_out=False)
+                    # ensure train outputs are iterable more than once
+                    train_outputs = {k: list(v) for k, v
+                                     in train_outputs.items()}
                     train_evaluation = evaluation(
                         evaluators, batch_dataset, runners,
                         train_results, train_outputs)
@@ -148,6 +164,8 @@ def training_loop(tf_manager: TensorFlowManager,
                         tf_manager, runners, val_dataset,
                         postprocess, write_out=False,
                         batch_size=runners_batch_size)
+                    # ensure val outputs are iterable more than once
+                    val_outputs = {k: list(v) for k, v in val_outputs.items()}
                     val_evaluation = evaluation(
                         evaluators, val_dataset, runners, val_results,
                         val_outputs)
@@ -213,7 +231,10 @@ def training_loop(tf_manager: TensorFlowManager,
                         color='blue')
 
                     log_print("")
-                    _print_examples(val_dataset, val_outputs)
+                    _print_examples(val_dataset, val_outputs,
+                                    val_preview_input_series,
+                                    val_preview_output_series,
+                                    val_preview_num_examples)
 
     except KeyboardInterrupt:
         log("Training interrupted by user.")
@@ -235,10 +256,30 @@ def training_loop(tf_manager: TensorFlowManager,
     log("Finished.")
 
 
+def _check_series_collisions(runners: List[BaseRunner],
+                             postprocess: Postprocess) -> None:
+    """Check if output series names do not collide."""
+    runners_outputs = set()  # type: Set[str]
+    for runner in runners:
+        series = runner.output_series
+        if series in runners_outputs:
+            raise Exception(("Output series '{}' is multiple times among the "
+                             "runners' outputs.").format(series))
+        else:
+            runners_outputs.add(series)
+    if postprocess is not None:
+        for series, _ in postprocess:
+            if series in runners_outputs:
+                raise Exception(("Postprocess output series '{}' "
+                                 "already exists.").format(series))
+            else:
+                runners_outputs.add(series)
+
+
 def run_on_dataset(tf_manager: TensorFlowManager,
                    runners: List[BaseRunner],
                    dataset: Dataset,
-                   postprocess: Callable,
+                   postprocess: Postprocess,
                    write_out: bool=False,
                    batch_size: Optional[int]=None) \
                                                 -> Tuple[List[ExecutionResult],
@@ -269,13 +310,13 @@ def run_on_dataset(tf_manager: TensorFlowManager,
                                      compute_losses=contains_targets,
                                      batch_size=batch_size)
 
-    result_data_raw = {runner.output_series: result.outputs
-                       for runner, result in zip(runners, all_results)}
+    result_data = {runner.output_series: result.outputs
+                   for runner, result in zip(runners, all_results)}
 
     if postprocess is not None:
-        result_data = postprocess(dataset, result_data_raw)
-    else:
-        result_data = result_data_raw
+        for series_name, postprocessor in postprocess:
+            postprocessed = postprocessor(dataset, result_data)
+            result_data[series_name] = postprocessed
 
     if write_out:
         for series_id, data in result_data.items():
@@ -411,38 +452,86 @@ def _data_item_to_str(item: Any) -> str:
 
 def _print_examples(dataset: Dataset,
                     outputs: Dict[str, List[Any]],
+                    val_preview_input_series: Optional[List[str]]=None,
+                    val_preview_output_series: Optional[List[str]]=None,
                     num_examples=15) -> None:
-    """Print examples of the model output."""
-    log_print(colored("Examples:", attrs=['bold']))
+    """Print examples of the model output.
+
+    Arguments:
+        dataset: The dataset from which to take examples
+        outputs: A mapping from the output series ID to the list of its
+            contents
+        val_preview_input_series: An optional list of input series to include
+            in the preview. An input series is a data series that is present in
+            the dataset. It can be either a target series (one that is also
+            present in the outputs, i.e. reference), or a source series (one
+            that is not among the outputs). In the validation preview, source
+            input series and preprocessed target series are yellow and target
+            (reference) series are red. If None, all series are written.
+        val_preview_output_series: An optional list of output series to include
+            in the preview. An output series is a data series that is present
+            among the outputs. In the preview, magenta is used as the font
+            color for output series
+    """
+    log_print(colored("Examples:", attrs=["bold"]))
+
+    source_series_names = [s for s in dataset.series_ids if s not in outputs]
+    target_series_names = [s for s in dataset.series_ids if s in outputs]
+    output_series_names = list(outputs.keys())
+
+    if val_preview_input_series is not None:
+        target_series_names = [s for s in target_series_names
+                               if s in val_preview_input_series]
+        source_series_names = [s for s in source_series_names
+                               if s in val_preview_input_series]
+
+    if val_preview_output_series is not None:
+        output_series_names = [s for s in output_series_names
+                               if s in val_preview_output_series]
+
+    if not target_series_names:
+        log("Warning! No reference series to preview during validation",
+            color="red")
+
+    if not source_series_names:
+        log("Warning! No source series to preview during validation",
+            color="red")
+
+    if not output_series_names:
+        log("Warning! No output series to preview during validation",
+            color="red")
 
     # for further indexing we need to make sure, all relevant
     # dataset series are lists
     target_series = {series_id: list(dataset.get_series(series_id))
-                     for series_id in outputs.keys()
-                     if dataset.has_series(series_id)}
+                     for series_id in target_series_names}
     source_series = {series_id: list(dataset.get_series(series_id))
-                     for series_id in dataset.series_ids
-                     if series_id not in outputs}
+                     for series_id in source_series_names}
 
     for i in range(min(len(dataset), num_examples)):
-        log_print(colored("  [{}]".format(i + 1), color='magenta',
-                          attrs=['bold']))
+        log_print(colored("  [{}]".format(i + 1), color="magenta",
+                          attrs=["bold"]))
 
         def print_line(prefix, color, content):
             colored_prefix = colored(prefix, color=color)
             formated = _data_item_to_str(content)
             log_print("  {}: {}".format(colored_prefix, formated))
 
+        # Input source series = yellow
         for series_id, data in sorted(source_series.items(),
                                       key=lambda x: x[0]):
-            print_line(series_id, 'yellow', data[i])
+            print_line(series_id, "yellow", data[i])
 
-        for series_id, data in sorted(outputs.items(),
-                                      key=lambda x: x[0]):
+        # Output series = magenta
+        for series_id in sorted(output_series_names):
+            data = list(outputs[series_id])
             model_output = data[i]
-            print_line(series_id, 'magenta', model_output)
+            print_line(series_id, "magenta", model_output)
 
-            if series_id in target_series:
-                desired_output = target_series[series_id][i]
-                print_line(series_id + " (ref)", "red", desired_output)
+        # Input target series (a.k.a. references) = red
+        for series_id in sorted(target_series_names):
+            data = outputs[series_id]
+            desired_output = target_series[series_id][i]
+            print_line(series_id + " (ref)", "red", desired_output)
+
         log_print("")

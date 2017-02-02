@@ -23,6 +23,7 @@ class ClassSymbol(object):
 
     def create(self):
         class_parts = self.clazz.split(".")
+
         class_name = class_parts[-1]
 
         # TODO should we not assume that everything is from neuralmonkey?
@@ -167,11 +168,11 @@ def build_config(config_dicts, ignore_names):
     if "main" not in config_dicts:
         raise Exception("Configuration does not contain the main block.")
 
-    existing_objects = dict()
+    existing_objects = collections.OrderedDict()
 
     main_config = config_dicts['main']
 
-    configuration = dict()
+    configuration = collections.OrderedDict()
     # TODO ensure tf_manager goes last in a better way
     for key, value in sorted(main_config.items(),
                              key=lambda t: t[0] if t[0] != 'tf_manager'

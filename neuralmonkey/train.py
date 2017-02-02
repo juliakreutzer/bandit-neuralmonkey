@@ -34,6 +34,12 @@ def create_config() -> Configuration:
     config.add_argument('test_datasets', list, required=False, default=[])
     config.add_argument('logging_period', int, required=False, default=20)
     config.add_argument('validation_period', int, required=False, default=500)
+    config.add_argument('val_preview_input_series', list,
+                        required=False, default=None)
+    config.add_argument('val_preview_output_series', list,
+                        required=False, default=None)
+    config.add_argument('val_preview_num_examples', int,
+                        required=False, default=15)
     config.add_argument('runners_batch_size', int,
                         required=False, default=None)
     config.add_argument('minimize', bool, required=False, default=False)
@@ -67,51 +73,34 @@ def main() -> None:
     np.random.seed(cfg.args.random_seed)
     tf.set_random_seed(cfg.args.random_seed)
 
-    cfg.build_model()
-
-    if cfg.args.initial_variables is not None:
-        cfg.model.tf_manager.restore(cfg.args.initial_variables)
-        log("Restoring model from {}".format(cfg.args.initial_variables))
-    else:
-        log("Building model from scratch")
-
     # pylint: disable=no-member
-    if (os.path.isdir(cfg.model.output) and
-            os.path.exists(os.path.join(cfg.model.output, "experiment.ini"))):
-        if cfg.model.overwrite_output_dir:
+    if (os.path.isdir(cfg.args.output) and
+            os.path.exists(os.path.join(cfg.args.output, "experiment.ini"))):
+        if cfg.args.overwrite_output_dir:
             # we do not want to delete the directory contents
             log("Directory with experiment.ini '{}' exists, "
                 "overwriting enabled, proceeding."
-                .format(cfg.model.output))
+                .format(cfg.args.output))
         else:
             log("Directory with experiment.ini '{}' exists, "
                 "overwriting disabled."
-                .format(cfg.model.output), color='red')
+                .format(cfg.args.output), color='red')
             exit(1)
-
-    try:
-        check_dataset_and_coders(cfg.model.train_dataset,
-                                 cfg.model.runners)
-        check_dataset_and_coders(cfg.model.val_dataset,
-                                 cfg.model.runners)
-    except CheckingException as exc:
-        log(str(exc), color='red')
-        exit(1)
 
     # pylint: disable=broad-except
-    if not os.path.isdir(cfg.model.output):
+    if not os.path.isdir(cfg.args.output):
         try:
-            os.mkdir(cfg.model.output)
+            os.mkdir(cfg.args.output)
         except Exception as exc:
             log("Failed to create experiment directory: {}. Exception: {}"
-                .format(cfg.model.output, exc), color='red')
+                .format(cfg.args.output, exc), color='red')
             exit(1)
 
-    log_file = "{}/experiment.log".format(cfg.model.output)
-    ini_file = "{}/experiment.ini".format(cfg.model.output)
-    git_commit_file = "{}/git_commit".format(cfg.model.output)
-    git_diff_file = "{}/git_diff".format(cfg.model.output)
-    variables_file_prefix = "{}/variables.data".format(cfg.model.output)
+    log_file = "{}/experiment.log".format(cfg.args.output)
+    ini_file = "{}/experiment.ini".format(cfg.args.output)
+    git_commit_file = "{}/git_commit".format(cfg.args.output)
+    git_diff_file = "{}/git_diff".format(cfg.args.output)
+    variables_file_prefix = "{}/variables.data".format(cfg.args.output)
 
     cont_index = 0
 
@@ -124,50 +113,76 @@ def main() -> None:
         cont_index += 1
 
         log_file = "{}/experiment.log.cont-{}".format(
-            cfg.model.output, cont_index)
+            cfg.args.output, cont_index)
         ini_file = "{}/experiment.ini.cont-{}".format(
-            cfg.model.output, cont_index)
+            cfg.args.output, cont_index)
         git_commit_file = "{}/git_commit.cont-{}".format(
-            cfg.model.output, cont_index)
+            cfg.args.output, cont_index)
         git_diff_file = "{}/git_diff.cont-{}".format(
-            cfg.model.output, cont_index)
+            cfg.args.output, cont_index)
         variables_file_prefix = "{}/variables.data.cont-{}".format(
-            cfg.model.output, cont_index)
+            cfg.args.output, cont_index)
 
     copyfile(sys.argv[1], ini_file)
     Logging.set_log_file(log_file)
-    Logging.print_header(cfg.model.name)
 
     # this points inside the neuralmonkey/ dir inside the repo, but
     # it does not matter for git.
     repodir = os.path.dirname(os.path.realpath(__file__))
 
-    os.system("cd {}/..; git log -1 --format=%H > {}"
+    # we need to execute the git log command in subshell, because if
+    # the log file is specified via relative path, we need to do the
+    # redirection of the git-log output to the right file
+    os.system("(cd {}; git log -1 --format=%H) > {}"
               .format(repodir, git_commit_file))
 
-    os.system("cd {}/..; git --no-pager diff --color=always > {}"
+    os.system("(cd {}; git --no-pager diff --color=always) > {}"
               .format(repodir, git_diff_file))
 
     link_best_vars = "{}.best".format(variables_file_prefix)
+
+    cfg.build_model()
+
+    if cfg.args.initial_variables is not None and \
+                    len(cfg.args.initial_variables) > 0:
+        log("Restoring model from {}".format(cfg.args.initial_variables))
+        cfg.model.tf_manager.restore(cfg.args.initial_variables)
+    else:
+        log("Building model from scratch")
+
+    try:
+        check_dataset_and_coders(cfg.model.train_dataset,
+                                 cfg.model.runners)
+        check_dataset_and_coders(cfg.model.val_dataset,
+                                 cfg.model.runners)
+    except CheckingException as exc:
+        log(str(exc), color='red')
+        exit(1)
+
+    Logging.print_header(cfg.model.name)
 
     # runners_batch_size must be set to avoid problems on GPU
     if cfg.model.runners_batch_size is None:
         cfg.model.runners_batch_size = cfg.model.batch_size
 
-    training_loop(tf_manager=cfg.model.tf_manager,
-                  epochs=cfg.model.epochs,
-                  trainer=cfg.model.trainer,
-                  batch_size=cfg.model.batch_size,
-                  train_dataset=cfg.model.train_dataset,
-                  val_dataset=cfg.model.val_dataset,
-                  log_directory=cfg.model.output,
-                  evaluators=cfg.model.evaluation,
-                  runners=cfg.model.runners,
-                  test_datasets=cfg.model.test_datasets,
-                  link_best_vars=link_best_vars,
-                  vars_prefix=variables_file_prefix,
-                  logging_period=cfg.model.logging_period,
-                  validation_period=cfg.model.validation_period,
-                  postprocess=cfg.model.postprocess,
-                  runners_batch_size=cfg.model.runners_batch_size,
-                  minimize_metric=cfg.model.minimize)
+    training_loop(
+        tf_manager=cfg.model.tf_manager,
+        epochs=cfg.model.epochs,
+        trainer=cfg.model.trainer,
+        batch_size=cfg.model.batch_size,
+        train_dataset=cfg.model.train_dataset,
+        val_dataset=cfg.model.val_dataset,
+        log_directory=cfg.model.output,
+        evaluators=cfg.model.evaluation,
+        runners=cfg.model.runners,
+        test_datasets=cfg.model.test_datasets,
+        link_best_vars=link_best_vars,
+        vars_prefix=variables_file_prefix,
+        logging_period=cfg.model.logging_period,
+        validation_period=cfg.model.validation_period,
+        val_preview_input_series=cfg.model.val_preview_input_series,
+        val_preview_output_series=cfg.model.val_preview_output_series,
+        val_preview_num_examples=cfg.model.val_preview_num_examples,
+        postprocess=cfg.model.postprocess,
+        runners_batch_size=cfg.model.runners_batch_size,
+        minimize_metric=cfg.model.minimize)
