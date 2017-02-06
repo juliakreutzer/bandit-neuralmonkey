@@ -17,10 +17,10 @@ def expected_loss_objective(decoder, k) -> BanditObjective:
         decoder=decoder,
         samples=decoder.sample_ids,
         sample_logprobs=decoder.sample_logprobs,
-        loss=tf.reduce_mean(tf.mul(decoder.sample_probs, -(1-decoder.rewards)),
+        loss=tf.reduce_mean(tf.mul(decoder.sample_probs, -decoder.rewards),
                              [0, 1]),
         gradients=lambda grad_fun: grad_fun(
-            tf.mul(decoder.sample_logprobs, -(1-decoder.rewards))),
+            tf.mul(decoder.sample_logprobs, -decoder.rewards)),
         sample_size=k
     )
 
