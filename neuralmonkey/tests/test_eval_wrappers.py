@@ -6,9 +6,14 @@ from neuralmonkey.evaluators.multeval import MultEvalWrapper
 from neuralmonkey.evaluators.beer import BeerWrapper
 from neuralmonkey.evaluators.bleu import BLEUEvaluator
 from neuralmonkey.evaluators.gleu import GLEUEvaluator
+from neuralmonkey.evaluators.f1 import F1Evaluator
 
 ref = ["I", "like", "tulips", "."]
 hyp = ["I", "hate", "flowers", "and", "stones", "."]
+
+# 4 common, |bio| = 7, |bio_ref| = 6
+bio     = "BBOBOOOBIIOOOOOBIBIIIIB"
+bio_ref = "BIOBOOOBIIBIOOOBIBIIIIO"
 
 class TestExternalEvaluators(unittest.TestCase):
 
@@ -87,6 +92,12 @@ class TestExternalEvaluators(unittest.TestCase):
         self.assertGreater(max_gleu, min_gleu)
         self.assertGreater(gleu, min_gleu)
         self.assertGreaterEqual(max_gleu, gleu)
+
+    def test_f1(self):
+        f1_evaluator = F1Evaluator()
+        f1val = f1_evaluator([bio], [bio_ref])
+        print("F1: {}".format(f1val))
+        self.assertAlmostEqual(f1val, 8.0/13.0)
 
 
 if __name__ == "__main__":

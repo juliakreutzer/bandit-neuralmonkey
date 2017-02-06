@@ -57,9 +57,10 @@ class FactoredEncoder(ModelPart, Attentive):
             name: The name for this encoder. [sentence_encoder]
             dropout_keep_prob: 1 - Dropout probability [1]
         """
-        attention_type = kwargs.get("attention_type", None)
+        self._attention_type = kwargs.get("attention_type", None)
         ModelPart.__init__(self, name, save_checkpoint, load_checkpoint)
-        Attentive.__init__(attention_type, **kwargs)
+        #Attentive.__init__(self._attention_type, **kwargs)
+        Attentive.__init__(self, self._attention_type, attention_fertility=3)
         for vocabulary in vocabularies:
             assert_type(self, 'vocabulary', vocabulary, Vocabulary)
 
@@ -135,10 +136,11 @@ class FactoredEncoder(ModelPart, Attentive):
     def _create_encoder_graph(self):
         self.dropout_placeholder = tf.placeholder(tf.float32, name="dropout")
         self.is_training = tf.placeholder(tf.bool, name="is_training")
-
+        #print("***")
+        #print(self.max_input_len)
         self.padding_weights = [
             tf.placeholder(tf.float32, shape=[None], name="input_{}".format(i))
-            for i in range(self.max_input_len + 2)]
+            for i in range(self.max_input_len + 1)]
 
         sentence_lengths = tf.to_int64(sum(self.padding_weights))
 
@@ -154,7 +156,7 @@ class FactoredEncoder(ModelPart, Attentive):
                 prefix = "{}_".format(data_id)
 
             names = ["{}input_{}".format(prefix, i)
-                     for i in range(self.max_input_len + 2)]
+                     for i in range(self.max_input_len + 1)]
 
             inputs = [tf.placeholder(tf.int32, shape=[None], name=n)
                       for n in names]
@@ -162,7 +164,7 @@ class FactoredEncoder(ModelPart, Attentive):
             # Create embeddings for this factor and embed the placeholders
             # NOTE the initialization
             embeddings = tf.get_variable(
-                "word_embeddings", shape=[len(vocabulary), embedding_size],
+                "word_embeddings{}".format(data_id), shape=[len(vocabulary), embedding_size],
                 initializer=tf.random_normal_initializer(stddev=0.01))
 
             embedded_inputs = [tf.nn.embedding_lookup(embeddings, i)
@@ -173,7 +175,7 @@ class FactoredEncoder(ModelPart, Attentive):
                 for i in embedded_inputs]
 
             # Resulting shape is batch x embedding_size
-            assert_shape(dropped_embedded_inputs, [None, embedding_size])
+            #assert_shape(dropped_embedded_inputs, [None, embedding_size])
             factors.append(dropped_embedded_inputs)
 
             # Add inputs and weights to self to be able to feed them
@@ -222,7 +224,7 @@ class FactoredEncoder(ModelPart, Attentive):
         factor_vectors_and_weights = {
             data_id: vocabulary.sentences_to_tensor(factors[data_id],
                                                     self.max_input_len,
-                                                    train_mode=train)
+                                                    train_mode=train, add_start_symbol=True, add_end_symbol=True)
             for data_id, vocabulary in zip(self.data_ids, self.vocabularies)}
 
         # check input lengths
@@ -244,6 +246,9 @@ class FactoredEncoder(ModelPart, Attentive):
         for data_id in self.data_ids:
             inputs = self.factor_inputs[data_id]
             vectors, _ = factor_vectors_and_weights[data_id]
+            #print("#####")
+            #print(len(inputs))
+            #print(len(vectors))
             for words_plc, words_tensor in zip(inputs, vectors):
                 fd[words_plc] = words_tensor
 
