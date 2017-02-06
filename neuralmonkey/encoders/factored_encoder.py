@@ -92,6 +92,16 @@ class FactoredEncoder(ModelPart, Attentive):
     def _attention_tensor(self):
         return self.__attention_tensor
 
+    def _get_placeholders(self):
+        """
+        Get all the placeholders of the encoder
+        :return:
+        """
+        placeholders = [self.dropout_placeholder,
+                        self.is_training, self.padding_weights,
+                        self.factor_inputs]
+        return placeholders
+
     def _get_rnn_cell(self):
         """Return the RNN cell for the encoder"""
         # pylint: disable=redefined-variable-type
