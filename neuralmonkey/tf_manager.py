@@ -142,7 +142,6 @@ class TensorFlowManager(object):
                        for s in execution_scripts]
         [all_feeds.extend(s.get_executable(summaries=True, update=False)
                           .get_feeds()) for s in execution_scripts]
-
         all_fetches = []
         [all_fetches.extend(s.get_executable(summaries=True,
                                              update=True).get_fetches())

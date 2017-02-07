@@ -99,8 +99,9 @@ class FactoredEncoder(ModelPart, Attentive):
         :return:
         """
         placeholders = [self.dropout_placeholder,
-                        self.is_training, self.padding_weights,
-                        self.factor_inputs]
+                        self.is_training]
+        placeholders.extend(self.padding_weights)
+        [placeholders.extend(x) for x in self.factor_inputs.values()]
         return placeholders
 
     def _get_rnn_cell(self):
@@ -136,8 +137,6 @@ class FactoredEncoder(ModelPart, Attentive):
     def _create_encoder_graph(self):
         self.dropout_placeholder = tf.placeholder(tf.float32, name="dropout")
         self.is_training = tf.placeholder(tf.bool, name="is_training")
-        #print("***")
-        #print(self.max_input_len)
         self.padding_weights = [
             tf.placeholder(tf.float32, shape=[None], name="input_{}".format(i))
             for i in range(self.max_input_len + 1)]
@@ -246,9 +245,6 @@ class FactoredEncoder(ModelPart, Attentive):
         for data_id in self.data_ids:
             inputs = self.factor_inputs[data_id]
             vectors, _ = factor_vectors_and_weights[data_id]
-            #print("#####")
-            #print(len(inputs))
-            #print(len(vectors))
             for words_plc, words_tensor in zip(inputs, vectors):
                 fd[words_plc] = words_tensor
 
