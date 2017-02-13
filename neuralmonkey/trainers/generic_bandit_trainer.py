@@ -22,8 +22,7 @@ BanditObjective = NamedTuple('BanditObjective',
                         ('samples', Any),  # TODO better type
                         ('sample_logprobs', Any),
                         ('loss', Any),
-                        ('gradients', Any),
-                        ('sample_size', int)])
+                        ('gradients', Any)])
 
 BIAS_REGEX = re.compile(r'[Bb]ias')
 
@@ -66,8 +65,6 @@ class GenericBanditTrainer(object):
                               collections=["summary_train"])
             tf.scalar_summary('train_l2', l2_value,
                               collections=["summary_train"])
-
-            # TODO use several objectives
 
             # loss is scalar, avg over batch
             self.loss = self.objective.loss + self.regularizer_cost
