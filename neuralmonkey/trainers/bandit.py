@@ -22,7 +22,7 @@ def expected_loss_objective(decoder, entropy_weight) -> BanditObjective:
         # TODO include entropy in loss
         gradients=lambda grad_fun: grad_fun(
             tf.mul(decoder.sample_logprobs,
-                   (-decoder.rewards - tf.mul(
+                   (-decoder.rewards + tf.mul(
                        entropy_weight, decoder.sample_logprobs + 1))))
     )
 
@@ -56,7 +56,7 @@ def pairwise_objective(decoder, entropy_weight) -> BanditObjective:
                              [0, 1]),
         gradients=lambda grad_fun: grad_fun(tf.mul(
             decoder.pair_logprobs, -(1-decoder.rewards)
-                                   - tf.mul(entropy_weight,
+                                   + tf.mul(entropy_weight,
                                             decoder.sample_logprobs + 1)))
     )
 
