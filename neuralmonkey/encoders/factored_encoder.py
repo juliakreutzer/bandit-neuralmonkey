@@ -58,9 +58,10 @@ class FactoredEncoder(ModelPart, Attentive):
             dropout_keep_prob: 1 - Dropout probability [1]
         """
         self._attention_type = kwargs.get("attention_type", None)
+        self._attention_fertility = kwargs.get("attention_fertility", 3)
         ModelPart.__init__(self, name, save_checkpoint, load_checkpoint)
-        #Attentive.__init__(self._attention_type, **kwargs)
-        Attentive.__init__(self, self._attention_type, attention_fertility=3)
+        Attentive.__init__(self, self._attention_type,
+                           attention_fertility=self._attention_fertility)
         for vocabulary in vocabularies:
             assert_type(self, 'vocabulary', vocabulary, Vocabulary)
 
