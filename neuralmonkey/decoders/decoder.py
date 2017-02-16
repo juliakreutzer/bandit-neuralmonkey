@@ -91,6 +91,7 @@ class Decoder(ModelPart):
         self._rnn_cell = rnn_cell
 
         self.rewards = tf.placeholder(tf.float32, [None], name="rewards")
+        self.epoch = tf.placeholder(tf.int32, [], name="epoch")
 
         if self.embedding_size is None and self.embeddings_encoder is None:
             raise ValueError("You must specify either embedding size or the "
@@ -596,6 +597,6 @@ class Decoder(ModelPart):
         Get all the placeholders of the decoder
         :return:
         """
-        placeholders = [self.rewards, self.go_symbols, self.train_mode,
+        placeholders = [self.rewards, self.epoch, self.go_symbols, self.train_mode,
                         self.train_inputs, self.train_padding]
         return placeholders

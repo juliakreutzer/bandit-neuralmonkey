@@ -158,6 +158,7 @@ class TensorFlowManager(object):
     def execute_bandits(self,
                         dataset: Dataset,
                         execution_scripts,
+                        epoch,
                         train=False,
                         summaries=True,
                         batch_size=None,
@@ -186,7 +187,7 @@ class TensorFlowManager(object):
                         (feedables,
                          tensors_to_execute,
                          add_feed_dict) = executable.next_to_execute(
-                            reward=rewards)
+                            reward=rewards, epoch=epoch)
 
                         all_feedables = all_feedables.union(feedables)
 

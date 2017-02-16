@@ -91,6 +91,7 @@ class GenericBanditTrainer(object):
             self.update_op = self.optimizer.apply_gradients(
                 _sum_gradients([self.gradients, self.reg_gradients]))
 
+            # hack: partial run requires Tensor as output of operation
             with tf.control_dependencies([self.update_op]):
                 self.dummy = tf.constant(0)
 
@@ -115,6 +116,7 @@ class GenericBanditTrainer(object):
         if update:
             return UpdateBanditExecutable(self.all_coders,
                                           self.objective.decoder.rewards,
+                                          self.objective.decoder.epoch,
                                           self.dummy, self.loss,
                                           self.scalar_summaries
                                           if summaries else None,
@@ -161,10 +163,11 @@ def _clip_probs(probs, prob_threshold):
 
 class UpdateBanditExecutable(BanditExecutable):
 
-    def __init__(self, all_coders, reward_placeholder, update_op, loss,
-                 scalar_summaries, histogram_summaries):
+    def __init__(self, all_coders, reward_placeholder, epoch_placeholder,
+                 update_op, loss, scalar_summaries, histogram_summaries):
         self.all_coders = all_coders
         self.reward_placeholder = reward_placeholder
+        self.epoch_placeholder = epoch_placeholder
         self.update_op = update_op
         self.loss = loss
         self.scalar_summaries = scalar_summaries
@@ -172,7 +175,7 @@ class UpdateBanditExecutable(BanditExecutable):
 
         self.result = None
 
-    def next_to_execute(self, reward: List[float]) -> NextExecute:
+    def next_to_execute(self, reward: List[float], epoch: int) -> NextExecute:
         fetches = {'update_op': self.update_op}
         if self.scalar_summaries is not None:
             fetches['scalar_summaries'] = self.scalar_summaries
@@ -180,7 +183,8 @@ class UpdateBanditExecutable(BanditExecutable):
         fetches['loss'] = self.loss
         feedables = self.all_coders
         # extra feed for reward
-        return feedables, fetches, {self.reward_placeholder: reward}
+        return feedables, fetches, {self.reward_placeholder: reward,
+                                    self.epoch_placeholder: epoch}
 
     def collect_results(self, results: List[Dict]) -> None:
         if self.scalar_summaries is None:
@@ -221,7 +225,7 @@ class SampleBanditExecutable(BanditExecutable):
 
         self.result = None
 
-    def next_to_execute(self, reward=None) -> NextExecute:
+    def next_to_execute(self, reward=None, epoch=None) -> NextExecute:
         fetches = {'sample_op': self.sample_op}
         fetches["greedy_op"] = self.greedy_op
         if self.scalar_summaries is not None:
