@@ -20,11 +20,11 @@ def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
         loss=tf.reduce_mean(tf.mul(decoder.sample_probs, -decoder.rewards),
                              [0, 1]),
         # TODO include entropy in loss
-        gradients=lambda grad_fun: grad_fun(
-            tf.mul(decoder.sample_logprobs,
-                   (-decoder.rewards + tf.mul(
-                       _get_temperature(initial_temperature, decoder.epoch),
-                       decoder.sample_logprobs + 1))))
+        gradients=lambda grad_fun: _scale_gradients(
+            grad_fun(decoder.sample_logprobs),
+            -tf.reduce_mean(-decoder.rewards +
+             tf.mul(_get_temperature(initial_temperature, decoder.epoch),
+                    decoder.sample_logprobs + 1)))
     )
 
 
@@ -46,6 +46,7 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
                 (factor*_clip_probs(decoder.sample_probs, clip_prob))))
     )
 
+
 def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     return BanditObjective(
@@ -55,9 +56,10 @@ def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
         sample_logprobs=[decoder.sample_logprobs, decoder.sample_logprobs_2],
         loss=tf.reduce_mean(tf.mul(decoder.pair_probs, -(1-decoder.rewards)),
                              [0, 1]),
-        gradients=lambda grad_fun: grad_fun(tf.mul(
-            decoder.pair_logprobs, -(1-decoder.rewards)
-                                   + tf.mul(_get_temperature(initial_temperature, decoder.epoch),
+        gradients=lambda grad_fun: _scale_gradients(
+            grad_fun(decoder.pair_logprobs),
+            tf.reduce_mean(-(1-decoder.rewards) +
+            tf.mul(_get_temperature(initial_temperature, decoder.epoch),
                                             decoder.sample_logprobs + 1)))
     )
 
