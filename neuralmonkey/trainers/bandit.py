@@ -22,8 +22,8 @@ def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
         # TODO include entropy in loss
         gradients=lambda grad_fun: _scale_gradients(
             grad_fun(decoder.sample_logprobs),
-            -tf.reduce_mean(-decoder.rewards +
-             tf.mul(_get_temperature(initial_temperature, decoder.epoch),
+            tf.reduce_mean(-decoder.rewards +
+            tf.mul(_get_temperature(initial_temperature, decoder.epoch),
                     decoder.sample_logprobs + 1)))
     )
 
