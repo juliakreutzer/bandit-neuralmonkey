@@ -1,4 +1,6 @@
 import argparse
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -39,6 +41,7 @@ def plotBLEU(logfile):
     plotfile = "{}.BLEU.png".format(logfile)
     plt.savefig(plotfile)
     print("Saved BLEU plot in {}".format(plotfile))
+    plt.close()
 
 
 def loadArrays(dir):
@@ -85,12 +88,37 @@ def plotGradNorm(logfile, gradients, name):
     sorted_its = sorted(gradients)
     norms = [np.linalg.norm(gradients[i]) for i in sorted_its]
     plt.plot(sorted_its, norms)
-    plt.ylim(min(norms)-2*np.std(norms), max(norms)+2*np.std(norms))
+    s = np.std(norms)
+    plt.ylim(min(norms)-2*s, max(norms)+2*s)
     plt.xlabel("iterations")
     plt.title("{} norms for {}".format(name[:-1], logfile.split("/")[1]))
     plotfile = "{}.{}-norm.png".format(logfile, name)
     plt.savefig(plotfile)
     print("Saved norm plot in {}".format(plotfile))
+    plt.close()
+
+def plotAvgRewards(logfile, rewards):
+    sorted_its = sorted(rewards)
+    avg_rewards = [np.mean(rewards[i])*100 for i in sorted_its]
+    plt.plot(sorted_its, avg_rewards)
+    plt.xlabel("iterations")
+    plt.title("avg rewards for {}".format(logfile.split("/")[1]))
+    plotfile = "{}.avg-rewards.png".format(logfile)
+    plt.savefig(plotfile)
+    print("Saved avg rewards plot in {}".format(plotfile))
+    plt.close()
+
+def plotCumRewards(logfile, rewards):
+    sorted_its = sorted(rewards)
+    sum_rewards = [np.sum(rewards[i]) * 100 for i in sorted_its]
+    cum_rewards = [np.sum(sum_rewards[:i]) for i in range(len(sorted_its))]
+    plt.plot(sorted_its, cum_rewards)
+    plt.xlabel("iterations")
+    plt.title("cumulative rewards for {}".format(logfile.split("/")[1]))
+    plotfile = "{}.cum-rewards.png".format(logfile)
+    plt.savefig(plotfile)
+    print("Saved cumulative rewards plot in {}".format(plotfile))
+    plt.close()
 
 def main():
     p = argparse.ArgumentParser(description="Analysis of learning process")
@@ -110,6 +138,9 @@ def main():
 
     plotGradNorm(args.logfile, gradients, "gradients")
     plotGradNorm(args.logfile, updates, "updates")
+
+    plotAvgRewards(args.logfile, rewards)
+    plotCumRewards(args.logfile, rewards)
 
 
 if __name__=="__main__":
