@@ -109,6 +109,9 @@ def main() -> None:
             exit(1)
 
     log_file = "{}/experiment.log".format(cfg.model.output)
+    gradients_file = "{}/gradients.log".format(cfg.model.output)
+    updates_file = "{}/updates.log".format(cfg.model.output)
+    rewards_file = "{}/rewards.log".format(cfg.model.output)
     ini_file = "{}/experiment.ini".format(cfg.model.output)
     git_commit_file = "{}/git_commit".format(cfg.model.output)
     git_diff_file = "{}/git_diff".format(cfg.model.output)
@@ -125,6 +128,12 @@ def main() -> None:
         cont_index += 1
 
         log_file = "{}/experiment.log.cont-{}".format(
+            cfg.model.output, cont_index)
+        gradients_file = "{}/gradients.log.cont-{}".format(
+            cfg.model.output, cont_index)
+        updates_file = "{}/updates.log.cont-{}".format(
+            cfg.model.output, cont_index)
+        rewards_file = "{}/rewards.log.cont-{}".format(
             cfg.model.output, cont_index)
         ini_file = "{}/experiment.ini.cont-{}".format(
             cfg.model.output, cont_index)
@@ -170,6 +179,7 @@ def main() -> None:
                   train_dataset=cfg.model.train_dataset,
                   val_dataset=cfg.model.val_dataset,
                   log_directory=cfg.model.output,
+                  valuelog_dirs=[gradients_file, updates_file, rewards_file],
                   evaluators=cfg.model.evaluation,
                   runners=cfg.model.runners,
                   test_datasets=cfg.model.test_datasets,

@@ -225,7 +225,6 @@ class TensorFlowManager(object):
         collected_results = []  # type: List[BanditExecutionResult]
         for result_list in batch_results:
             collected_results.append(reduce_execution_results(result_list))
-            collected_results.append(result_list)
         return collected_results
 
     def save(self, variable_files: Union[str, List[str]]) -> None:

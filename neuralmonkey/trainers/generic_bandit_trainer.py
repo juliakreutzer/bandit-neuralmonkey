@@ -72,11 +72,13 @@ class GenericBanditTrainer(object):
             # compute and apply gradients
             self.gradients = self.objective.gradients(self._get_gradients)
             self.reg_gradients = self._get_gradients(self.regularizer_cost)
+            self.all_gradients = \
+                _sum_gradients([self.gradients, self.reg_gradients])
 
             if clip_norm:
                 assert clip_norm > 0.0
-                self.gradients = [(tf.clip_by_norm(grad, clip_norm), var)
-                             for grad, var in self.gradients
+                self.all_gradients = [(tf.clip_by_norm(grad, clip_norm), var)
+                             for grad, var in self.all_gradients
                              if grad is not None]
 
             self.all_coders = set.union(
@@ -88,17 +90,48 @@ class GenericBanditTrainer(object):
                              self.objective.sample_logprobs
             self.greedy_op = self.objective.decoder.decoded
 
-            self.update_op = self.optimizer.apply_gradients(
-                _sum_gradients([self.gradients, self.reg_gradients]))
+            self.update_op = self.optimizer.apply_gradients(self.all_gradients)
 
             # hack: partial run requires Tensor as output of operation
             with tf.control_dependencies([self.update_op]):
                 self.dummy = tf.constant(0)
 
-            for grad, var in self.gradients:
+            for grad, var in self.all_gradients:
                 if grad is not None:
                     tf.histogram_summary('gr_' + var.name, grad,
                                          collections=["summary_gradients"])
+
+
+            # prepare stochastic gradients to be fetched them from the graph
+            # sort gradients by variable name
+            sorted_gradients = sorted(self.all_gradients,
+                                      key=lambda tup: tup[1].name)
+            # flatten the gradients to one big vector to track them
+            flattened_gradients = []
+            flattened_updates = []
+            for grad, var in sorted_gradients:
+
+                if isinstance(optimizer, tf.train.AdamOptimizer):
+                    lr_t = optimizer._lr
+                    m_t = optimizer._beta1 * optimizer.get_slot(var, "m") + \
+                          (1-optimizer._beta1) * grad
+                    v_t = optimizer._beta2 * optimizer.get_slot(var, "v") + \
+                          (1-optimizer._beta2) * (grad*grad)
+                    var_update = - lr_t * m_t / (tf.sqrt(v_t) + optimizer._epsilon)
+
+                elif isinstance(optimizer, tf.train.GradientDescentOptimizer):
+                    lr_t = optimizer._learning_rate
+                    var_update = - lr_t * grad
+
+                # TODO implement this for adadelta etc.
+                else:
+                    raise NotImplementedError
+
+                flattened_gradients.append(tf.reshape(grad,[-1]))
+                flattened_updates.append(tf.reshape(var_update, [-1]))
+
+            self.concatenated_gradients = tf.concat(0, flattened_gradients)
+            self.concatenated_updates = tf.concat(0, flattened_updates)
 
             self.histogram_summaries = tf.merge_summary(
                 tf.get_collection("summary_gradients"))
@@ -118,6 +151,8 @@ class GenericBanditTrainer(object):
                                           self.objective.decoder.rewards,
                                           self.objective.decoder.epoch,
                                           self.dummy, self.loss,
+                                          [self.concatenated_gradients,
+                                           self.concatenated_updates],
                                           self.scalar_summaries
                                           if summaries else None,
                                           self.histogram_summaries
@@ -143,14 +178,6 @@ def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:
     return [(tensor, var) for var, tensor in summed_dict.items()]
 
 
-def _scale_gradients(gradients: [Gradients], scalar) -> Gradients:
-    scaled_grads = []
-    for tensor, var in gradients:
-        if tensor is not None:
-            scaled_grads.append((tensor*scalar, var))
-    return scaled_grads
-
-
 def _clip_probs(probs, prob_threshold):
     """ Clip probabilities to some threshold """
     if prob_threshold > 0.00:
@@ -164,7 +191,7 @@ def _clip_probs(probs, prob_threshold):
 class UpdateBanditExecutable(BanditExecutable):
 
     def __init__(self, all_coders, reward_placeholder, epoch_placeholder,
-                 update_op, loss, scalar_summaries, histogram_summaries):
+                 update_op, loss, gradient, scalar_summaries, histogram_summaries):
         self.all_coders = all_coders
         self.reward_placeholder = reward_placeholder
         self.epoch_placeholder = epoch_placeholder
@@ -172,6 +199,7 @@ class UpdateBanditExecutable(BanditExecutable):
         self.loss = loss
         self.scalar_summaries = scalar_summaries
         self.histogram_summaries = histogram_summaries
+        self.gradient = gradient
 
         self.result = None
 
@@ -181,6 +209,7 @@ class UpdateBanditExecutable(BanditExecutable):
             fetches['scalar_summaries'] = self.scalar_summaries
             fetches['histogram_summaries'] = self.histogram_summaries
         fetches['loss'] = self.loss
+        fetches['gradient'] = self.gradient
         feedables = self.all_coders
         # extra feed for reward
         return feedables, fetches, {self.reward_placeholder: reward,
@@ -195,12 +224,13 @@ class UpdateBanditExecutable(BanditExecutable):
             histogram_summaries = results[0]['histogram_summaries']
 
         self.result = BanditExecutionResult(
-            [], loss=results[0]['loss'], scalar_summaries=scalar_summaries,
+            [results[0]['gradient']], loss=results[0]['loss'],
+            scalar_summaries=scalar_summaries,
             histogram_summaries=histogram_summaries,
             image_summaries=None)
 
     def get_fetches(self):
-        fetches = [self.update_op, self.loss]
+        fetches = [self.update_op, self.loss, self.gradient]
         if self.scalar_summaries is not None:
             fetches.append(self.scalar_summaries)
         if self.histogram_summaries is not None:
@@ -222,7 +252,6 @@ class SampleBanditExecutable(BanditExecutable):
         self.scalar_summaries = scalar_summaries
         self.histogram_summaries = histogram_summaries
         self.regularization_cost = regularization_cost
-
         self.result = None
 
     def next_to_execute(self, reward=None, epoch=None) -> NextExecute:

@@ -1,9 +1,7 @@
 from typing import Any, List
 
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer, \
-    BanditObjective, _clip_probs, _scale_gradients
-from neuralmonkey.logging import log
-
+    BanditObjective, _clip_probs
 
 import tensorflow as tf
 
@@ -20,11 +18,22 @@ def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
         loss=tf.reduce_mean(tf.mul(decoder.sample_probs, -decoder.rewards),
                              [0, 1]),
         # TODO include entropy in loss
-        gradients=lambda grad_fun: _scale_gradients(
-            grad_fun(decoder.sample_logprobs),
-            tf.reduce_mean(-decoder.rewards +
-            tf.mul(_get_temperature(initial_temperature, decoder.epoch),
-                    decoder.sample_logprobs + 1)))
+        gradients=lambda grad_fun: grad_fun(
+            tf.reduce_mean(  # mean gradient of batch
+                            decoder.sample_logprobs *  # score function
+                            tf.stop_gradient(  # don't differentiate this
+                                            # loss from user feedback
+                                            -decoder.rewards +
+                                            # entropy regularizer T*(log p +1)
+                                            # T is annealed
+                                            _get_temperature(
+                                                initial_temperature,
+                                                decoder.epoch)
+                                            * (decoder.sample_logprobs + 1)
+                            )
+            )
+        )
+        # TODO: rewards, entropy, gradients must be averaged over samples (for now only one sample)
     )
 
 
@@ -38,12 +47,23 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
         sample_logprobs=decoder.sample_logprobs,
         loss=-tf.reduce_mean(tf.mul(decoder.sample_logprobs, decoder.rewards),
                              [0, 1]),
-        gradients=lambda grad_fun: _scale_gradients(
-            grad_fun(decoder.sample_logprobs),
-            -tf.reduce_mean(
-                (decoder.rewards - tf.mul(_get_temperature(initial_temperature, decoder.epoch),
-                                          decoder.sample_logprobs + 1))/
-                (factor*_clip_probs(decoder.sample_probs, clip_prob))))
+        gradients=lambda grad_fun: grad_fun(
+            tf.reduce_mean(   # mean gradient of batch
+                decoder.sample_logprobs *  # score function
+                tf.stop_gradient(  # don't differentiate this
+                                (decoder.rewards -
+                                 # entropy regularizer T*(log p +1)
+                                 # T is annealed
+                                 _get_temperature(
+                                     initial_temperature,
+                                     decoder.epoch)
+                                 * (decoder.sample_logprobs + 1))
+                                /  # divide by factor * clipped sample prob
+                                (factor*
+                                 _clip_probs(decoder.sample_probs, clip_prob))
+                )
+            )
+        )
     )
 
 
@@ -56,12 +76,23 @@ def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
         sample_logprobs=[decoder.sample_logprobs, decoder.sample_logprobs_2],
         loss=tf.reduce_mean(tf.mul(decoder.pair_probs, -(1-decoder.rewards)),
                              [0, 1]),
-        gradients=lambda grad_fun: _scale_gradients(
-            grad_fun(decoder.pair_logprobs),
-            tf.reduce_mean(-(1-decoder.rewards) +
-            tf.mul(_get_temperature(initial_temperature, decoder.epoch),
-                                            decoder.sample_logprobs + 1)))
+        gradients=lambda grad_fun: grad_fun(
+            tf.reduce_mean(  # mean gradient of batch
+                decoder.pair_logprobs *  # score function
+                tf.stop_gradient(  # don't differentiate this
+                    # loss from user feedback
+                    -(1-decoder.rewards) +
+                    # entropy regularizer T*(log p +1)
+                    # T is annealed
+                    _get_temperature(
+                        initial_temperature,
+                        decoder.epoch)
+                    * (decoder.pair_logprobs + 1)
+                )
+            )
+        )
     )
+
 
 def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
         -> BanditObjective:
@@ -74,12 +105,23 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
                          decoder.sample_logprobs_2],
         loss=-tf.reduce_mean(tf.mul(decoder.pair_logprobs,
                                     decoder.rewards), [0, 1]),
-        gradients=lambda grad_fun: _scale_gradients(
-            grad_fun(decoder.pair_logprobs),
-            -tf.reduce_mean(
-                (decoder.rewards - tf.mul(_get_temperature(initial_temperature, decoder.epoch),
-                                          decoder.sample_logprobs + 1))/
-                 (factor*_clip_probs(decoder.pair_probs, clip_prob))))
+        gradients=lambda grad_fun: grad_fun(
+            tf.reduce_mean(  # mean gradient of batch
+                decoder.pair_logprobs *  # score function
+                tf.stop_gradient(  # don't differentiate this
+                    (decoder.rewards -
+                     # entropy regularizer T*(log p +1)
+                     # T is annealed
+                     _get_temperature(
+                         initial_temperature,
+                         decoder.epoch)
+                     * (decoder.pair_logprobs + 1))
+                    /  # divide by factor * clipped sample prob
+                    (factor *
+                     _clip_probs(decoder.pair_probs, clip_prob))
+                )
+            )
+        )
     )
 
 

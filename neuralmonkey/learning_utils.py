@@ -29,6 +29,7 @@ def training_loop(tf_manager: TensorFlowManager,
                   train_dataset: Dataset,
                   val_dataset: Dataset,
                   log_directory: str,
+                  valuelog_dirs: List[str],
                   evaluators: EvalConfiguration,
                   runners: List[BaseRunner],
                   test_datasets: Optional[List[Dataset]]=None,
@@ -239,23 +240,24 @@ def training_loop(tf_manager: TensorFlowManager,
 
 # pylint: disable=too-many-arguments, too-many-locals, too-many-branches
 def bandit_training_loop(tf_manager: TensorFlowManager,
-                  epochs: int,
-                  trainer: GenericBanditTrainer,
-                  batch_size: int,
-                  train_dataset: Dataset,
-                  val_dataset: Dataset,
-                  log_directory: str,
-                  evaluators: EvalConfiguration,
-                  runners: List[BaseRunner],
-                  test_datasets: Optional[List[Dataset]]=None,
-                  save_n_best_vars: int=1,
-                  link_best_vars="/tmp/variables.data.best",
-                  vars_prefix="/tmp/variables.data",
-                  logging_period: int=20,
-                  validation_period: int=500,
-                  runners_batch_size: Optional[int]=None,
-                  postprocess: Callable=None,
-                  minimize_metric: bool=False):
+                         epochs: int,
+                         trainer: GenericBanditTrainer,
+                         batch_size: int,
+                         train_dataset: Dataset,
+                         val_dataset: Dataset,
+                         log_directory: str,
+                         valuelog_dirs: List[str],
+                         evaluators: EvalConfiguration,
+                         runners: List[BaseRunner],
+                         test_datasets: Optional[List[Dataset]]=None,
+                         save_n_best_vars: int=1,
+                         link_best_vars="/tmp/variables.data.best",
+                         vars_prefix="/tmp/variables.data",
+                         logging_period: int=20,
+                         validation_period: int=500,
+                         runners_batch_size: Optional[int]=None,
+                         postprocess: Callable=None,
+                         minimize_metric: bool=False):
 
     # TODO finish the list
     """
@@ -333,6 +335,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
     best_score_epoch = 0
     best_score_batch_no = 0
+
+    [os.makedirs(v, exist_ok=True) for v in valuelog_dirs]
 
     log("Starting training")
     try:
@@ -456,19 +460,19 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                                      function.name, r))
                             i += 1
 
-                # update model with samples and their rewards
-                summaries_bool = step % logging_period == logging_period - 1
+                summaries_bool = True #step % logging_period == logging_period - 1
 
+                # update model with samples and their rewards
                 update_result = tf_manager.execute_bandits(
-                    # trainer somehow needs 2 different executables
                     batch_dataset, [trainer], update=True,
                     summaries=summaries_bool, rewards=rewards, epoch=epoch_n-1,
                     train=True
                 )
 
+                stochastic_gradient, stochastic_update = update_result[0].outputs[0]
+
                 if step % logging_period == 0:
                     log("loss: {}".format(update_result[0].loss), color='red')
-
 
                 if step % logging_period == logging_period - 1:
                     train_results, train_outputs = run_on_dataset(
@@ -484,8 +488,17 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                                seen_instances,
                                                epoch_n,
                                                epochs,
-                                               train_results,
+                                               execution_results=update_result,
                                                train=True)
+
+                    # write out gradients, updates and rewards
+                    np.save("{}/{}".format(valuelog_dirs[0], seen_instances),
+                            stochastic_gradient)
+                    np.save("{}/{}".format(valuelog_dirs[1], seen_instances),
+                            stochastic_update)
+                    np.save("{}/{}".format(valuelog_dirs[2], seen_instances),
+                            rewards)
+
 
                 if step % validation_period == validation_period - 1:
                     val_results, val_outputs = run_on_dataset(
@@ -704,7 +717,7 @@ def _log_continuous_evaluation(tb_writer: tf.train.SummaryWriter,
                               result.histogram_summaries,
                               result.image_summaries]:
                 if summaries is not None:
-                    tb_writer.add_summary(summaries, seen_instances)
+                   tb_writer.add_summary(summaries, seen_instances)
 
         external_str = \
             tf.Summary(value=[tf.Summary.Value(tag=prefix + "_" + name,
