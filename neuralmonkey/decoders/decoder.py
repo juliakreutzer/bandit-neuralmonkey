@@ -90,6 +90,7 @@ class Decoder(ModelPart):
         self.embeddings_encoder = embeddings_encoder
         self._rnn_cell = rnn_cell
 
+        # TODO reward should have shape batch x sample_size
         self.rewards = tf.placeholder(tf.float32, [None], name="rewards")
         self.epoch = tf.placeholder(tf.int32, [], name="epoch")
 
@@ -238,14 +239,11 @@ class Decoder(ModelPart):
             self.sample_ids = tf.pack(sample_ids)  # time x batch x sample_size
             sample_logprobs_time = tf.pack(sample_logprobs_time)
             self.sample_logprobs = tf.reduce_sum(sample_logprobs_time, 0)  # batch x sample_size for full sequence
-            log("sample log probs: {}".format(self.sample_logprobs))
-
 
             self.sample_probs = tf.exp(self.sample_logprobs)  # timestep-length list of batch_size x sample_size tensors
 
-            # second sample, needed for some bandit objectives
+            # second sample, needed for pairwise bandit objectives
             # TODO find other way of sampling pairs
-            # TODO does that make sense?
             # FIXME get probs for negative weights (self.runtime_logits_neg)
             sample_logprobs_time_2, sample_ids_2 = self.sample_batch(neg=True)
             self.sample_ids_2 = tf.pack(sample_ids_2)
@@ -320,7 +318,7 @@ class Decoder(ModelPart):
         for p in model_logprob:  # time steps
 
             # with gather_nd
-            # FIXME no gradients implemented yet
+            # FIXME no gradients implemented yet in tf version 0.11
             #sample_id = tf.squeeze(tf.cast(tf.multinomial(p, 1), tf.int32))
             #batch_enum = tf.range(tf.shape(sample_id)[0])
             #indices = tf.pack([batch_enum, sample_id], 1)
