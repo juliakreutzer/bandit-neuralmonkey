@@ -68,7 +68,7 @@ def computeVariance(gradients, name):
     max_var = 0
     sum_var = 0
     for i in sorted(gradients):
-        var_t = np.linalg.norm(gradients[i]-expected_grad)**2
+        var_t = np.linalg.norm(gradients[i]-expected_grad, 2)**2
         sum_var += var_t
         if var_t > max_var:
             max_var = var_t
@@ -78,23 +78,23 @@ def computeVariance(gradients, name):
     return max_var, mean_var
 
 
-def computeAvgNorm(gradients, name):
-    avg_norm = np.mean([np.linalg.norm(g) for g in gradients.values()])
-    print("Mean norm for {}: {}".format(name, avg_norm))
+def computeAvgSqNorm(gradients, name):
+    avg_norm = np.mean([np.linalg.norm(g, 2)**2 for g in gradients.values()])
+    print("Mean squared norm for {}: {}".format(name, avg_norm))
     return avg_norm
 
 
-def plotGradNorm(logfile, gradients, name):
+def plotGradSqNorm(logfile, gradients, name):
     sorted_its = sorted(gradients)
-    norms = [np.linalg.norm(gradients[i]) for i in sorted_its]
+    norms = [np.linalg.norm(gradients[i], 2)**2 for i in sorted_its]
     plt.plot(sorted_its, norms)
     s = np.std(norms)
     plt.ylim(min(norms)-2*s, max(norms)+2*s)
     plt.xlabel("iterations")
-    plt.title("{} norms for {}".format(name[:-1], logfile.split("/")[1]))
+    plt.title("{} squared norms for {}".format(name[:-1], logfile.split("/")[1]))
     plotfile = "{}.{}-norm.png".format(logfile, name)
     plt.savefig(plotfile)
-    print("Saved norm plot in {}".format(plotfile))
+    print("Saved squared norm plot in {}".format(plotfile))
     plt.close()
 
 def plotAvgRewards(logfile, rewards):
@@ -133,11 +133,11 @@ def main():
 
     computeVariance(gradients, "gradients")
     computeVariance(updates, "updates")
-    computeAvgNorm(gradients, "gradients")
-    computeAvgNorm(updates, "updates")
+    computeAvgSqNorm(gradients, "gradients")
+    computeAvgSqNorm(updates, "updates")
 
-    plotGradNorm(args.logfile, gradients, "gradients")
-    plotGradNorm(args.logfile, updates, "updates")
+    plotGradSqNorm(args.logfile, gradients, "gradients")
+    plotGradSqNorm(args.logfile, updates, "updates")
 
     plotAvgRewards(args.logfile, rewards)
     plotCumRewards(args.logfile, rewards)
