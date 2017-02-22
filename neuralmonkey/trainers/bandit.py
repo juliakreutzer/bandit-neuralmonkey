@@ -49,7 +49,7 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
                              [0, 1]),
         gradients=lambda grad_fun: grad_fun(
             tf.reduce_mean(   # mean gradient of batch
-                decoder.sample_logprobs *  # score function
+                -decoder.sample_logprobs *  # score function
                 tf.stop_gradient(  # don't differentiate this
                                 (decoder.rewards -
                                  # entropy regularizer T*(log p +1)
@@ -107,7 +107,7 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
                                     decoder.rewards), [0, 1]),
         gradients=lambda grad_fun: grad_fun(
             tf.reduce_mean(  # mean gradient of batch
-                decoder.pair_logprobs *  # score function
+                -decoder.pair_logprobs *  # score function
                 tf.stop_gradient(  # don't differentiate this
                     (decoder.rewards -
                      # entropy regularizer T*(log p +1)
