@@ -39,9 +39,11 @@ def training_loop(tf_manager: TensorFlowManager,
                   validation_period: int=500,
                   runners_batch_size: Optional[int]=None,
                   postprocess: Callable=None,
-                  minimize_metric: bool=False):
+                  minimize_metric: bool=False,
+                  store_gradients: bool=False):
 
     # TODO finish the list
+    # TODO gradient storing not used here
     """
     Performs the training loop for given graph and data.
 
@@ -257,7 +259,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                          validation_period: int=500,
                          runners_batch_size: Optional[int]=None,
                          postprocess: Callable=None,
-                         minimize_metric: bool=False):
+                         minimize_metric: bool=False,
+                         store_gradients: bool=False):
 
     # TODO finish the list
     """
@@ -290,6 +293,9 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
     if save_n_best_vars < 1:
         raise Exception('save_n_best_vars must be greater than zero')
+
+    if store_gradients:
+        log("Storing gradients and updates")
 
     if save_n_best_vars == 1:
         variables_files = [vars_prefix]
@@ -336,7 +342,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
     best_score_epoch = 0
     best_score_batch_no = 0
 
-    [os.makedirs(v, exist_ok=True) for v in valuelog_dirs]
+    if store_gradients:
+        [os.makedirs(v, exist_ok=True) for v in valuelog_dirs]
 
     log("Starting training")
     try:
@@ -492,12 +499,13 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                                train=True)
 
                     # write out gradients, updates and rewards
-                    np.save("{}/{}".format(valuelog_dirs[0], seen_instances),
-                            stochastic_gradient)
-                    np.save("{}/{}".format(valuelog_dirs[1], seen_instances),
-                            stochastic_update)
-                    np.save("{}/{}".format(valuelog_dirs[2], seen_instances),
-                            rewards)
+                    if store_gradients:
+                        np.save("{}/{}".format(valuelog_dirs[0], seen_instances),
+                                stochastic_gradient)
+                        np.save("{}/{}".format(valuelog_dirs[1], seen_instances),
+                                stochastic_update)
+                        np.save("{}/{}".format(valuelog_dirs[2], seen_instances),
+                                rewards)
 
 
                 if step % validation_period == validation_period - 1:

@@ -44,6 +44,7 @@ def create_config() -> Configuration:
     config.add_argument('initial_variables', str, required=False, default=[])
     config.add_argument('overwrite_output_dir', bool, required=False,
                         default=False)
+    config.add_argument('store_gradients', bool, required=False, default=False)
 
     return config
 
@@ -189,4 +190,5 @@ def main() -> None:
                   validation_period=cfg.model.validation_period,
                   postprocess=cfg.model.postprocess,
                   runners_batch_size=cfg.model.runners_batch_size,
-                  minimize_metric=cfg.model.minimize)
+                  minimize_metric=cfg.model.minimize,
+                  store_gradients=cfg.model.store_gradients)
