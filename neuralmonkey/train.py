@@ -45,6 +45,7 @@ def create_config() -> Configuration:
     config.add_argument('overwrite_output_dir', bool, required=False,
                         default=False)
     config.add_argument('store_gradients', bool, required=False, default=False)
+    config.add_argument('batch_reward', bool, required=False, default=False)
 
     return config
 
@@ -191,4 +192,5 @@ def main() -> None:
                   postprocess=cfg.model.postprocess,
                   runners_batch_size=cfg.model.runners_batch_size,
                   minimize_metric=cfg.model.minimize,
-                  store_gradients=cfg.model.store_gradients)
+                  store_gradients=cfg.model.store_gradients,
+                  batch_reward=cfg.model.batch_reward)
