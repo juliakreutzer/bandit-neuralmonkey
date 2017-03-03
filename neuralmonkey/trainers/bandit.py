@@ -19,7 +19,7 @@ def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
                              [0, 1]),
         # TODO include entropy in loss
         gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(  # mean gradient of batch
+            tf.reduce_mean(  # mean gradient of batch and samples
                             decoder.sample_logprobs *  # score function
                             tf.stop_gradient(  # don't differentiate this
                                             # loss from user feedback
@@ -48,7 +48,7 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
         loss=-tf.reduce_mean(tf.mul(decoder.sample_logprobs, decoder.rewards),
                              [0, 1]),
         gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(   # mean gradient of batch
+            tf.reduce_mean(   # mean gradient of batch and samples
                 -decoder.sample_logprobs *  # score function
                 tf.stop_gradient(  # don't differentiate this
                                 (decoder.rewards -
@@ -77,7 +77,7 @@ def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
         loss=tf.reduce_mean(tf.mul(decoder.pair_probs, -(1-decoder.rewards)),
                              [0, 1]),
         gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(  # mean gradient of batch
+            tf.reduce_mean(  # mean gradient of batch and samples
                 decoder.pair_logprobs *  # score function
                 tf.stop_gradient(  # don't differentiate this
                     # loss from user feedback
@@ -106,7 +106,7 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
         loss=-tf.reduce_mean(tf.mul(decoder.pair_logprobs,
                                     decoder.rewards), [0, 1]),
         gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(  # mean gradient of batch
+            tf.reduce_mean(  # mean gradient of batch and samples
                 -decoder.pair_logprobs *  # score function
                 tf.stop_gradient(  # don't differentiate this
                     (decoder.rewards -

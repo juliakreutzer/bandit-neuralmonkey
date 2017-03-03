@@ -376,6 +376,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 rewards = []
                 # for objectives with pairs of samples
+                # TODO for multiple samples
                 if trainer.pairwise:
                     # sampled_outputs and sampled_logprobs contains 2 samples
                     # for each sentence
@@ -456,52 +457,60 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                       format(reward, (np.sum(p1)-np.sum(p2))))
                                 i += 1
 
-                # for objectives with one sample for each sentence
+                # for objectives with single samples
                 else:
-                    # ids to words
-                    # sample dimension is squeezed
-                    sample_arrays = [np.squeeze(o, 1) for o in sampled_outputs]
+                    # sampled_output has shape: time_steps x batch_size x sample_size
+                    number_of_samples = sampled_outputs.shape[2]
+                    outputs_per_sample = np.array_split(sampled_outputs, number_of_samples, axis=2)
+                    # sampled_logprobs has shape: batch_size x sample_size
+                    logprobs_per_sample = np.array_split(sampled_logprobs, number_of_samples, axis=1)
+                    #sample_arrays = [np.squeeze(o, 1) for o in sampled_outputs]
+                    for s in range(number_of_samples):
+                        sample_rewards = []
+                        # ids to words
+                        sentences = trainer.objective.decoder.vocabulary.\
+                            vectors_to_sentences(outputs_per_sample[s])  # FIXME ugly
 
-                    sentences = trainer.objective.decoder.vocabulary.\
-                        vectors_to_sentences(sample_arrays)  # FIXME ugly
+                        # evaluate samples
+                        dataset_id, function = trainer.evaluator
 
-                    # evaluate samples
-                    dataset_id, function = trainer.evaluator
+                        desired_output = batch_dataset.get_series(dataset_id)
 
-                    desired_output = batch_dataset.get_series(dataset_id)
+                        # evaluate whole batch as corpus
+                        # TODO fix for multiple samples
+                        if batch_reward:
+                            r = function(sentences, desired_output)
+                            rewards = [r]*len(sentences)
 
-                    # evaluate whole batch as corpus
-                    if batch_reward:
-                        r = function(sentences, desired_output)
-                        rewards = [r]*len(sentences)
+                            if step % logging_period == 0:
+                                log("[Example batch]\navg logprob: {}\n{}: {}".format(
+                                                                     np.mean(np.sum(logprobs_per_sample[s])),
+                                                                     function.name, r))
 
-                        if step % logging_period == 0:
-                            log("[Example batch]\navg logprob: {}\n{}: {}".format(
-                                                                 np.mean(np.sum(sampled_logprobs)),
-                                                                 function.name, r))
+                        # evaluate every sentence separately
+                        else:
+                            i = 1
+                            for d, g, s, p in zip(desired_output, sentences_greedy,
+                                                  sentences, logprobs_per_sample[s]):
+                                r = function([s], [d])
+                                sample_rewards.append(r)
 
-                    # evaluate every sentence separately
-                    else:
-                        i = 1
-                        for d, g, s, p in zip(desired_output, sentences_greedy,
-                                              sentences, sampled_logprobs):
-                            r = function([s], [d])
-                            rewards.append(r)
+                                # TODO no binary version here yet
 
-                            # TODO no binary version here yet
+                                if len(rewards) <= 5\
+                                        and step % logging_period == 0:
+                                    log("[Example {}]\nref: {}\ngreedy: {}\nsample: "
+                                        "{}\nlogprob: {}\n{}: {}".format(i,
+                                                             " ".join(d),
+                                                             " ".join(g),
+                                                             " ".join(s),
+                                                             np.exp(np.sum(p)),
+                                                             function.name, r))
+                                    i += 1
+                        rewards.append(sample_rewards)
 
-                            if len(rewards) <= 5\
-                                    and step % logging_period == 0:
-                                log("[Example {}]\nref: {}\ngreedy: {}\nsample: "
-                                    "{}\nlogprob: {}\n{}: {}".format(i,
-                                                         " ".join(d),
-                                                         " ".join(g),
-                                                         " ".join(s),
-                                                         np.exp(np.sum(p)),
-                                                         function.name, r))
-                                i += 1
-
-                summaries_bool = True #step % logging_period == logging_period - 1
+                rewards = np.array(rewards).transpose()
+                summaries_bool = step % logging_period == logging_period - 1
 
                 # update model with samples and their rewards
                 update_result = tf_manager.execute_bandits(

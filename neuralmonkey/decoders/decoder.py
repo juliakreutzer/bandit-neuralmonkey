@@ -90,8 +90,10 @@ class Decoder(ModelPart):
         self.embeddings_encoder = embeddings_encoder
         self._rnn_cell = rnn_cell
 
-        # TODO reward should have shape batch x sample_size
-        self.rewards = tf.placeholder(tf.float32, [None], name="rewards")
+        self.sample_size = 2  # TODO make param and use
+
+        self.rewards = tf.placeholder(tf.float32, [None, self.sample_size],
+                                      name="rewards")
         self.epoch = tf.placeholder(tf.int32, [], name="epoch")
 
         if self.embedding_size is None and self.embeddings_encoder is None:
@@ -171,7 +173,6 @@ class Decoder(ModelPart):
                 train_inputs=embedded_train_inputs,
                 train_mode=True)
 
-
             assert not tf.get_variable_scope().reuse
             tf.get_variable_scope().reuse_variables()
 
@@ -188,17 +189,17 @@ class Decoder(ModelPart):
              self.runtime_rnn_states) = self._attention_decoder(
                  embedded_go_symbols,
                  attention_on_input=attention_on_input,
-                 train_mode=False, neg=False)
+                 train_mode=False)
 
             self.hidden_states = self.runtime_rnn_outputs
 
-            def decode(rnn_outputs, neg=False):
+            def decode(rnn_outputs):
                 with tf.name_scope("output_projection"):
                     logits = []
                     decoded = []
 
                     for out in rnn_outputs:
-                        out_activation = self._logit_function(out, neg=neg)
+                        out_activation = self._logit_function(out)
                         logits.append(out_activation)
                         decoded.append(tf.argmax(out_activation[:, 1:], 1) + 1)
 
@@ -217,10 +218,7 @@ class Decoder(ModelPart):
                                    for l in self.train_logits]
 
             self.decoded, self.runtime_logits = decode(
-                self.runtime_rnn_outputs, neg=False)
-
-           # _, self.runtime_logits_neg = decode(
-            #    self.runtime_rnn_outputs, neg=True)
+                self.runtime_rnn_outputs)
 
             self.runtime_loss = tf.nn.seq2seq.sequence_loss(
                 self.runtime_logits, train_targets,
@@ -229,30 +227,25 @@ class Decoder(ModelPart):
             self.runtime_logprobs = [tf.nn.log_softmax(l)
                                      for l in self.runtime_logits]
 
-            #self.runtime_logprobs_neg = [tf.nn.log_softmax(l)
-            #                             for l in self.runtime_logits_neg]
-
             # sampling
-            self.sample_size = 1  # TODO make param and use
-            # FIXME add multiple samples
-            sample_logprobs_time, sample_ids = self.sample_batch()  # timestep-length list of batch_size x 1
+            sample_logprobs_time, sample_ids = self.sample_batch(neg=False, sample_size=self.sample_size)  # timestep-length list of batch_size x sample_size
             self.sample_ids = tf.pack(sample_ids)  # time x batch x sample_size
             sample_logprobs_time = tf.pack(sample_logprobs_time)
             self.sample_logprobs = tf.reduce_sum(sample_logprobs_time, 0)  # batch x sample_size for full sequence
 
-            self.sample_probs = tf.exp(self.sample_logprobs)  # timestep-length list of batch_size x sample_size tensors
+            self.sample_probs = tf.exp(self.sample_logprobs)  # batch_size x sample_size
 
             # second sample, needed for pairwise bandit objectives
             # TODO find other way of sampling pairs
             # FIXME get probs for negative weights (self.runtime_logits_neg)
-            sample_logprobs_time_2, sample_ids_2 = self.sample_batch(neg=True)
+            # TODO multiple samples for pw
+            sample_logprobs_time_2, sample_ids_2 = self.sample_batch(neg=True, sample_size=self.sample_size)
             self.sample_ids_2 = tf.pack(sample_ids_2)
             sample_logprobs_time_2 = tf.pack(sample_logprobs_time_2)
             self.sample_logprobs_2 = tf.reduce_sum(sample_logprobs_time_2, 0)  # batch x sample_size
             self.sample_probs_2 = tf.exp(self.sample_logprobs_2)
             self.pair_logprobs = self.sample_logprobs+self.sample_logprobs_2
             self.pair_probs = tf.exp(self.pair_logprobs)
-
 
             # summaries
             tf.scalar_summary('train_loss_with_gt_intpus',
@@ -270,7 +263,7 @@ class Decoder(ModelPart):
 
             log("Decoder initalized.")
 
-    def sample_batch(self, neg=False):
+    def sample_batch(self, neg=False, sample_size=1):
         """
         Sample a target words for the full batch and return its ids and
         log probabilities
@@ -327,7 +320,7 @@ class Decoder(ModelPart):
             #sample_logprobs.append(sample_logprob)
 
             # with gather and flattening
-            sample_id = tf.cast(tf.multinomial(p, 1), tf.int32)  # batch_size x 1
+            sample_id = tf.cast(tf.multinomial(p, sample_size), tf.int32)  # batch_size x 1
             flat_p = tf.reshape(p, [-1])  # batch_size*vocab_size
             batch_size = tf.shape(sample_id)[0]
             # add correction to indices because of flattening
@@ -350,7 +343,6 @@ class Decoder(ModelPart):
         """
         sample_ids = tf.cast(tf.multinomial(self.runtime_logprobs[n], k),
                              tf.int32)
-        # TODO define seed, shape [batch_size, num_samples]
         sample_logprobs = tf.gather_nd(self.runtime_logprobs[n][0],
                                        sample_ids[0])  # non batch
         return sample_logprobs, tf.squeeze(sample_ids[0])
@@ -429,13 +421,9 @@ class Decoder(ModelPart):
                            self.dropout_keep_prob,
                            self.train_mode)
 
-    def _logit_function(self, state: tf.Tensor, neg: bool=False) -> tf.Tensor:
+    def _logit_function(self, state: tf.Tensor) -> tf.Tensor:
         state = dropout(state, self.dropout_keep_prob, self.train_mode)
-        if neg:
-            # for negative sample
-            return tf.matmul(state, -1.*self.decoding_w) + -1.*self.decoding_b
-        else:
-            return tf.matmul(state, self.decoding_w) + self.decoding_b
+        return tf.matmul(state, self.decoding_w) + self.decoding_b
 
     def _get_rnn_cell(self) -> tf.nn.rnn_cell.RNNCell:
         if self._rnn_cell == 'GRU':
@@ -458,8 +446,7 @@ class Decoder(ModelPart):
             train_inputs: tf.Tensor=None,
             attention_on_input=True,
             train_mode: bool=False,
-            scope: Union[str, tf.VariableScope]=None,
-            neg: bool=False,) -> Tuple[
+            scope: Union[str, tf.VariableScope]=None) -> Tuple[
                 List[tf.Tensor], List[tf.Tensor]]:
         """Run the decoder RNN.
 
@@ -509,7 +496,7 @@ class Decoder(ModelPart):
                     inp = train_inputs[i - 1]
                 else:
                     with tf.variable_scope("loop_function", reuse=True):
-                        out_activation = self._logit_function(prev, neg)
+                        out_activation = self._logit_function(prev)
                         prev_word_index = tf.argmax(out_activation, 1)
                         inp = self._embed_and_dropout(prev_word_index)
 

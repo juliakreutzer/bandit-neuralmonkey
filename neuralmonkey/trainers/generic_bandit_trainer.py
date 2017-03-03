@@ -30,7 +30,6 @@ BIAS_REGEX = re.compile(r'[Bb]ias')
 # pylint: disable=too-few-public-methods,too-many-locals
 class GenericBanditTrainer(object):
 
-    # FIXME
     # only one objective for now
 
     def __init__(self, objective: BanditObjective, evaluator,
