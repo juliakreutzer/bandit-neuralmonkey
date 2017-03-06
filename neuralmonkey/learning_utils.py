@@ -264,7 +264,6 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                          store_gradients: bool=False,
                          batch_reward: bool=False):
 
-    # TODO finish the list
     """
     Performs the training loop for given graph and data.
 
@@ -284,6 +283,19 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
             name of the dataset series the generated one is evaluated with and
             the evaluation function. If only one series names is provided, it
             means the generated and dataset series have the same name.
+        runners: List of runners.
+        test_datasets: List of datasets for testing.
+        link_best_vars: Link to best variables.
+        vars_prefix: Prefix for variables to store.
+        logging_period: log the process on training data every x batches.
+        validation_period: log the process on validation data every x batches.
+        runners_batch_size: batch size for runner.
+        postprocess: post-processor.
+        minimize_metric: whether to minimize the validation metric or not
+            (should be True for e.g. TER, but False for BLEU).
+        store_gradients: whether to store the gradients, updates and rewards
+            with logging.
+        batch_reward: compute the reward on the whole batch, not on each sample.
     """
 
     evaluators = [(e[0], e[0], e[1]) if len(e) == 2 else e
@@ -372,92 +384,109 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 sentences_greedy = trainer.objective.decoder.vocabulary. \
                     vectors_to_sentences(greedy_outputs)
 
-                # sampled_outputs: batch x max_len x sample_size (now 1)
+                # evaluate samples
+                dataset_id, function = trainer.evaluator
 
                 rewards = []
                 # for objectives with pairs of samples
-                # TODO for multiple samples
                 if trainer.pairwise:
                     # sampled_outputs and sampled_logprobs contains 2 samples
                     # for each sentence
 
-                    samples_1, samples_2 = sampled_outputs  # time is 1.dimension!
-                    sample_arrays_1 = [np.squeeze(o, 1) for o in samples_1]
-                    sample_arrays_2 = [np.squeeze(o, 1) for o in samples_2]
+                    pos_samples = sampled_outputs[0]
+                    neg_samples = sampled_outputs[1]
 
-                    sentences_1 = trainer.objective.decoder.vocabulary. \
-                        vectors_to_sentences(sample_arrays_1)
-                    sentences_2 = trainer.objective.decoder.vocabulary. \
-                        vectors_to_sentences(sample_arrays_2)
+                    pos_logprobs = sampled_logprobs[0]
+                    neg_logprobs = sampled_logprobs[1]
 
+                    number_of_samples = pos_samples.shape[2]
+                    pos_outputs_per_sample = np.array_split(pos_samples,
+                                                        number_of_samples,
+                                                        axis=2)
+                    neg_outputs_per_sample = np.array_split(neg_samples,
+                                                        number_of_samples,
+                                                        axis=2)
+                    pos_logprobs_per_sample = np.array_split(pos_logprobs,
+                                                         number_of_samples,
+                                                         axis=1)
+                    neg_logprobs_per_sample = np.array_split(neg_logprobs,
+                                                             number_of_samples,
+                                                             axis=1)
 
-                    logprobs_1, logprobs_2 = sampled_logprobs
+                    for s in range(number_of_samples):
+                        sample_rewards = []
+                        # ids to words
+                        pos_sentences = trainer.objective.decoder.vocabulary. \
+                            vectors_to_sentences(
+                            pos_outputs_per_sample[s])  # FIXME ugly
 
-                    dataset_id, function = trainer.evaluator
+                        neg_sentences = trainer.objective.decoder.vocabulary. \
+                            vectors_to_sentences(
+                            neg_outputs_per_sample[s])  # FIXME ugly
 
-                    desired_output = batch_dataset.get_series(dataset_id)
+                        desired_output = batch_dataset.get_series(dataset_id)
 
-                    # evaluate whole batch as corpus
-                    if batch_reward:
-                        r1 = function(sentences_1, desired_output)
-                        r2 = function(sentences_2, desired_output)
-
-                        # binary
-                        if trainer.binary_feedback:
-                            reward = 1. if r1 > r2 else 0.
-                        # continuous
-                        else:
-                            reward = r1 - r2
-                        rewards = [reward] * len(sentences_1)
-
-                        if step % logging_period == 0:
-                            log("[Example batch] avg logprob: {}\n{}: {}".format(
-                                np.mean(np.sum(sampled_logprobs)),
-                                function.name, reward))
-
-                    # evaluate every sentence pair separately
-                    else:
-                        for d, g, s1, s2, p1, p2 in zip(desired_output,
-                                                        sentences_greedy,
-                                                        sentences_1, sentences_2,
-                                                        logprobs_1, logprobs_2):
-
-                            r1 = function([s1], [d])
-                            r2 = function([s2], [d])
-
-                            # TODO different pairwise reward definitions
+                        # evaluate whole batch as corpus
+                        if batch_reward:
+                            r1 = function(pos_sentences, desired_output)
+                            r2 = function(neg_sentences, desired_output)
 
                             # binary
                             if trainer.binary_feedback:
                                 reward = 1. if r1 > r2 else 0.
                             # continuous
                             else:
-                                reward = r1-r2
+                                reward = r1 - r2
+                            sample_rewards.extend([reward] * len(pos_sentences))
 
-                            rewards.append(reward)
+                            if step % logging_period == 0:
+                                log("[Example batch] avg logprob: {}\n{}: {}".format(
+                                    np.mean(pos_logprobs_per_sample[s]+neg_logprobs_per_sample[s]),
+                                    function.name, reward))
 
-                            i = 1
-                            if len(rewards) <= 5 \
-                                    and step % logging_period == 0:
-                                # TODO some evaluators might return error not reward
-                                log("[Example {}]\nref: {}\ngreedy: {}\nsample_1: {}"
-                                    "\nlogprob: {}\n{}: {}\nsample_2: {}"
-                                    "\nlogprob: {}\n{}: {}".format(i,
-                                                               " ".join(d),
-                                                               " ".join(g),
-                                                               " ".join(s1),
-                                                               np.exp(np.sum(p1)),
-                                                               function.name,
-                                                               r1,
-                                                               " ".join(s2),
-                                                               np.exp(np.sum(p2)),
-                                                               function.name,
-                                                               r2))
-                                log("pair reward: {}, diff logprob: {}".
-                                      format(reward, (np.sum(p1)-np.sum(p2))))
-                                i += 1
+                        # evaluate every sentence pair separately
+                        else:
+                            for d, g, s1, s2, p1, p2 in zip(desired_output,
+                                                            sentences_greedy,
+                                                            pos_sentences, neg_sentences,
+                                                            pos_logprobs_per_sample[s],
+                                                            neg_logprobs_per_sample[s]):
 
-                # for objectives with single samples
+                                r1 = function([s1], [d])
+                                r2 = function([s2], [d])
+
+                                # binary
+                                if trainer.binary_feedback:
+                                    reward = 1. if r1 > r2 else 0.
+                                # continuous
+                                else:
+                                    reward = r1 - r2
+
+                                sample_rewards.append(reward)
+
+                                i = 1
+                                if len(rewards) <= 5 \
+                                        and step % logging_period == 0:
+                                    # TODO some evaluators might return error not reward
+                                    log("[Example {}]\nref: {}\ngreedy: {}\nsample_1: {}"
+                                        "\nlogprob: {}\n{}: {}\nsample_2: {}"
+                                        "\nlogprob: {}\n{}: {}".format(i,
+                                                                   " ".join(d),
+                                                                   " ".join(g),
+                                                                   " ".join(s1),
+                                                                   np.exp(p1),
+                                                                   function.name,
+                                                                   r1,
+                                                                   " ".join(s2),
+                                                                   np.exp(p2),
+                                                                   function.name,
+                                                                   r2))
+                                    log("pair reward: {}, diff logprob: {}".
+                                          format(reward, (p1-p2)))
+                                    i += 1
+                        rewards.append(sample_rewards)
+
+                # for objectives without pairwise comparisons
                 else:
                     # sampled_output has shape: time_steps x batch_size x sample_size
                     number_of_samples = sampled_outputs.shape[2]
@@ -471,20 +500,16 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         sentences = trainer.objective.decoder.vocabulary.\
                             vectors_to_sentences(outputs_per_sample[s])  # FIXME ugly
 
-                        # evaluate samples
-                        dataset_id, function = trainer.evaluator
-
                         desired_output = batch_dataset.get_series(dataset_id)
 
                         # evaluate whole batch as corpus
-                        # TODO fix for multiple samples
                         if batch_reward:
                             r = function(sentences, desired_output)
-                            rewards = [r]*len(sentences)
+                            sample_rewards.extend([r]*len(sentences))
 
                             if step % logging_period == 0:
                                 log("[Example batch]\navg logprob: {}\n{}: {}".format(
-                                                                     np.mean(np.sum(logprobs_per_sample[s])),
+                                                                     np.mean(logprobs_per_sample[s]),
                                                                      function.name, r))
 
                         # evaluate every sentence separately
@@ -504,7 +529,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                                              " ".join(d),
                                                              " ".join(g),
                                                              " ".join(s),
-                                                             np.exp(np.sum(p)),
+                                                             np.exp(p),
                                                              function.name, r))
                                     i += 1
                         rewards.append(sample_rewards)

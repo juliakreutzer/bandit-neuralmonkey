@@ -48,7 +48,8 @@ class Decoder(ModelPart):
                  rnn_cell: str='GRU',
                  attention_on_input: bool=True,
                  save_checkpoint: Optional[str]=None,
-                 load_checkpoint: Optional[str]=None) -> None:
+                 load_checkpoint: Optional[str]=None,
+                 sample_size = 1) -> None:
         """Create a refactored version of monster decoder.
 
         Arguments:
@@ -89,12 +90,6 @@ class Decoder(ModelPart):
         self.use_attention = use_attention
         self.embeddings_encoder = embeddings_encoder
         self._rnn_cell = rnn_cell
-
-        self.sample_size = 2  # TODO make param and use
-
-        self.rewards = tf.placeholder(tf.float32, [None, self.sample_size],
-                                      name="rewards")
-        self.epoch = tf.placeholder(tf.int32, [], name="epoch")
 
         if self.embedding_size is None and self.embeddings_encoder is None:
             raise ValueError("You must specify either embedding size or the "
@@ -228,6 +223,12 @@ class Decoder(ModelPart):
                                      for l in self.runtime_logits]
 
             # sampling
+            self.sample_size = sample_size
+
+            self.rewards = tf.placeholder(tf.float32, [None, self.sample_size],
+                                          name="rewards")
+            self.epoch = tf.placeholder(tf.int32, [], name="epoch")
+
             sample_logprobs_time, sample_ids = self.sample_batch(neg=False, sample_size=self.sample_size)  # timestep-length list of batch_size x sample_size
             self.sample_ids = tf.pack(sample_ids)  # time x batch x sample_size
             sample_logprobs_time = tf.pack(sample_logprobs_time)
@@ -237,8 +238,6 @@ class Decoder(ModelPart):
 
             # second sample, needed for pairwise bandit objectives
             # TODO find other way of sampling pairs
-            # FIXME get probs for negative weights (self.runtime_logits_neg)
-            # TODO multiple samples for pw
             sample_logprobs_time_2, sample_ids_2 = self.sample_batch(neg=True, sample_size=self.sample_size)
             self.sample_ids_2 = tf.pack(sample_ids_2)
             sample_logprobs_time_2 = tf.pack(sample_logprobs_time_2)

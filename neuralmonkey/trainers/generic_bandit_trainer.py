@@ -35,7 +35,7 @@ class GenericBanditTrainer(object):
     def __init__(self, objective: BanditObjective, evaluator,
                  l1_weight=0.0, l2_weight=0.0,
                  clip_norm=False, optimizer=None, pairwise=False,
-                 binary_feedback=False)\
+                 binary_feedback=False, number_of_samples=1)\
             -> None:
 
         with tf.name_scope("trainer"):

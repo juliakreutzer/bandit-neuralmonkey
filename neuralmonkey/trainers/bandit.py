@@ -33,7 +33,6 @@ def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
                             )
             )
         )
-        # TODO: rewards, entropy, gradients must be averaged over samples (for now only one sample)
     )
 
 
