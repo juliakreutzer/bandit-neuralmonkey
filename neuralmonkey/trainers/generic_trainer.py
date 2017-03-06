@@ -181,7 +181,7 @@ class TrainExecutable(Executable):
         avg_losses = [s / len(results) for s in losses_sum]
 
         self.result = ExecutionResult(
-            [], losses=avg_losses, gradient=None,
+            [], losses=avg_losses,
             scalar_summaries=scalar_summaries,
             histogram_summaries=histogram_summaries,
             image_summaries=None)
