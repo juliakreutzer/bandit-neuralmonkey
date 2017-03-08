@@ -162,7 +162,7 @@ class Decoder(ModelPart):
                         for e in self.encoders
                         if isinstance(e, Attentive)}
 
-            train_rnn_outputs, _ = self._attention_decoder(
+            train_rnn_outputs, _, train_attns = self._attention_decoder(
                 embedded_go_symbols,
                 attention_on_input=attention_on_input,
                 conditional_gru=conditional_gru,
@@ -181,8 +181,8 @@ class Decoder(ModelPart):
                     for e in self.encoders
                     if isinstance(e, Attentive)}
 
-            (self.runtime_rnn_outputs,
-             self.runtime_rnn_states) = self._attention_decoder(
+            self.runtime_rnn_outputs, self.runtime_rnn_states,\
+            runtime_attns = self._attention_decoder(
                  embedded_go_symbols,
                  attention_on_input=attention_on_input,
                  conditional_gru=conditional_gru,
@@ -190,19 +190,39 @@ class Decoder(ModelPart):
 
             self.hidden_states = self.runtime_rnn_outputs
 
-            def decode(rnn_outputs):
+            def decode(rnn_outputs, attns):
                 with tf.name_scope("output_projection"):
                     logits = []
                     decoded = []
 
-                    for out in rnn_outputs:
-                        out_activation = self._logit_function(out)
+                    unk_id = self.vocabulary.get_unk_id()
+
+                    assert len(rnn_outputs) == len(attns)
+                    for out, att in zip(rnn_outputs, attns):
+                        out_activation = self._logit_function(out)  # batch_size x vocabulary
+                        argmax_attention = tf.argmax(att[0], 1)  # att is batch_size x max_input_len
                         logits.append(out_activation)
-                        decoded.append(tf.argmax(out_activation[:, 1:], 1) + 1)
+                        argmax_symb = tf.argmax(out_activation[:, 1:], 1) + 1
+
+                        # instead of unk indices,
+                        # return -index of encoder input with
+                        # maximal attention
+                        def replace_unk(x):
+                            i, j = tf.unpack(x)
+                            return tf.cond(tf.equal(i, unk_id), lambda: (-j),
+                                           lambda: (i))
+
+                        symb_and_att = tf.pack([argmax_symb, argmax_attention],
+                                               1)
+
+                        argmax_symb = tf.map_fn(lambda x: replace_unk(x),
+                                                symb_and_att)
+
+                        decoded.append(argmax_symb)
 
                     return decoded, logits
 
-            _, self.train_logits = decode(train_rnn_outputs)
+            _, self.train_logits = decode(train_rnn_outputs, train_attns)
 
             train_targets = tf.unpack(self.train_inputs)
 
@@ -215,7 +235,7 @@ class Decoder(ModelPart):
                                    for l in self.train_logits]
 
             self.decoded, self.runtime_logits = decode(
-                self.runtime_rnn_outputs)
+                self.runtime_rnn_outputs, runtime_attns)
 
             self.runtime_loss = tf.nn.seq2seq.sequence_loss(
                 self.runtime_logits, train_targets,
@@ -329,7 +349,7 @@ class Decoder(ModelPart):
             conditional_gru: bool=False,
             train_mode: bool=False,
             scope: Union[str, tf.VariableScope]=None) -> Tuple[
-                List[tf.Tensor], List[tf.Tensor]]:
+                List[tf.Tensor], List[tf.Tensor], List[tf.Tensor]]:
         """Run the decoder RNN.
 
         Arguments:
@@ -367,6 +387,7 @@ class Decoder(ModelPart):
             attns = [tf.zeros([self.batch_size, a.attn_size])
                      for a in att_objects]
             states = []
+            attentions = []
             for i in range(self.max_output_len):
                 if i > 0:
                     tf.get_variable_scope().reuse_variables()
@@ -378,6 +399,7 @@ class Decoder(ModelPart):
                     inp = train_inputs[i - 1]
                 else:
                     with tf.variable_scope("loop_function", reuse=True):
+                        # TODO FIX ALERT WARNING CRITICAL
                         out_activation = self._logit_function(prev)
                         prev_word_index = tf.argmax(out_activation, 1)
                         inp = self._embed_and_dropout(prev_word_index)
@@ -394,6 +416,9 @@ class Decoder(ModelPart):
 
                 # Run the attention mechanism.
                 attns = [a.attention(cell_output) for a in att_objects]
+
+                # attention in time[i]: batch_size x input_len
+                attentions.append([a.attentions_in_time[i] for a in att_objects])
 
                 if conditional_gru:
                     x_2 = linear(
@@ -415,7 +440,7 @@ class Decoder(ModelPart):
                 prev = output
                 outputs.append(output)
 
-        return outputs, states
+        return outputs, states, attentions
 
     def _visualize_attention(self):
         """Create image summaries with attentions"""

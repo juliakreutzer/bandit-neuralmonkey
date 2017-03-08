@@ -442,7 +442,11 @@ class Vocabulary(collections.Sized):
         for vec in vectors:
             for sentence, word_i in zip(sentences, vec):
                 if not sentence or sentence[-1] != END_TOKEN:
-                    sentence.append(self.index_to_word[word_i])
+                    if word_i > 0:
+                        sentence.append(self.index_to_word[word_i])
+                    else:
+                        # for copying source words to target
+                        sentence.append("UNK-{}".format(-word_i))
 
         return [s[:-1] if s[-1] == END_TOKEN else s for s in sentences]
 
@@ -473,3 +477,6 @@ class Vocabulary(collections.Sized):
         log("Sample of the vocabulary: {}"
             .format([self.index_to_word[i]
                      for i in np.random.randint(0, len(self), size)]))
+
+    def get_unk_id(self):
+        return UNK_TOKEN_INDEX

@@ -41,6 +41,7 @@ def create_config() -> Configuration:
     config.add_argument('runners_batch_size', required=False, default=None)
     config.add_argument('minimize', required=False, default=False)
     config.add_argument('postprocess')
+    config.add_argument('copypostprocess')
     config.add_argument('name')
     config.add_argument('random_seed', required=False)
     config.add_argument('initial_variables', required=False, default=None)
@@ -173,6 +174,7 @@ def main() -> None:
         val_preview_output_series=cfg.model.val_preview_output_series,
         val_preview_num_examples=cfg.model.val_preview_num_examples,
         postprocess=cfg.model.postprocess,
+        copypostprocess=cfg.model.copypostprocess,
         train_start_offset=cfg.model.train_start_offset,
         runners_batch_size=cfg.model.runners_batch_size,
         initial_variables=cfg.model.initial_variables,

@@ -20,6 +20,7 @@ SeriesName = str
 EvalConfiguration = List[Union[Tuple[SeriesName, Any],
                                Tuple[SeriesName, SeriesName, Any]]]
 Postprocess = Optional[List[Tuple[SeriesName, Callable]]]
+CopyPostprocess = Optional[Callable]
 # pylint: enable=invalid-name
 
 
@@ -45,6 +46,7 @@ def training_loop(tf_manager: TensorFlowManager,
                   runners_batch_size: Optional[int]=None,
                   initial_variables: Optional[Union[str, List[str]]]=None,
                   postprocess: Postprocess=None,
+                  copypostprocess: CopyPostprocess=None,
                   minimize_metric: bool=False):
 
     # TODO finish the list
@@ -60,6 +62,8 @@ def training_loop(tf_manager: TensorFlowManager,
         val_dataset:
         postprocess: Function that takes the output sentence as produced by the
             decoder and transforms into tokenized sentence.
+        copypostprocess: Function that takes input and output sentence and copies
+            part of the input to the output.
         log_directory: Directory where the TensordBoard log will be generated.
             If None, nothing will be done.
         evaluators: List of evaluators. The last evaluator is used as the main.
@@ -159,7 +163,8 @@ def training_loop(tf_manager: TensorFlowManager,
                         summaries=True)
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
-                        postprocess, write_out=False)
+                        postprocess, copypostprocess, write_out=False)
+
                     # ensure train outputs are iterable more than once
                     train_outputs = {k: list(v) for k, v
                                      in train_outputs.items()}
@@ -180,7 +185,7 @@ def training_loop(tf_manager: TensorFlowManager,
                 if step % validation_period == validation_period - 1:
                     val_results, val_outputs = run_on_dataset(
                         tf_manager, runners, val_dataset,
-                        postprocess, write_out=False,
+                        postprocess, copypostprocess, write_out=False,
                         batch_size=runners_batch_size)
                     # ensure val outputs are iterable more than once
                     val_outputs = {k: list(v) for k, v in val_outputs.items()}
@@ -265,7 +270,7 @@ def training_loop(tf_manager: TensorFlowManager,
 
     for dataset in test_datasets:
         test_results, test_outputs = run_on_dataset(
-            tf_manager, runners, dataset, postprocess,
+            tf_manager, runners, dataset, postprocess, copypostprocess,
             write_out=True, batch_size=runners_batch_size)
         # ensure test outputs are iterable more than once
         test_outputs = {k: list(v) for k, v in test_outputs.items()}
@@ -300,6 +305,7 @@ def run_on_dataset(tf_manager: TensorFlowManager,
                    runners: List[BaseRunner],
                    dataset: Dataset,
                    postprocess: Postprocess,
+                   copypostprocess: CopyPostprocess,
                    write_out: bool=False,
                    batch_size: Optional[int]=None) \
                                                 -> Tuple[List[ExecutionResult],
@@ -337,6 +343,12 @@ def run_on_dataset(tf_manager: TensorFlowManager,
         for series_name, postprocessor in postprocess:
             postprocessed = postprocessor(dataset, result_data)
             result_data[series_name] = postprocessed
+
+    if copypostprocess is not None:
+        inputs = dataset.get_series("source")
+        for series_name, outputs in result_data.items():
+            copypostprocessed = copypostprocess(inputs, outputs)
+            result_data[series_name] = copypostprocessed
 
     if write_out:
         for series_id, data in result_data.items():

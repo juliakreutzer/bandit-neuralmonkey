@@ -225,7 +225,7 @@ class RuntimeRnnExecutable(Executable):
         self._beam_scoring_f = beam_scoring_f
         self._postprocess = postprocess
 
-        self._to_exapand = [None]  # type: List[Option[BeamBatch]]
+        self._to_expand = [None]  # type: List[Option[BeamBatch]]
         self._current_beam_batch = None
         self._expanded = []  # type: List[ExpandedBeamBatch]
         self._time_step = 0
@@ -245,7 +245,7 @@ class RuntimeRnnExecutable(Executable):
 
         to_run = {'logprobs': self._decoder.train_logprobs[self._time_step]}
 
-        self._current_beam_batch = self._to_exapand.pop()
+        self._current_beam_batch = self._to_expand.pop()
 
         if self._current_beam_batch is not None:
             batch_size, output_len = self._current_beam_batch.decoded.shape
@@ -283,14 +283,15 @@ class RuntimeRnnExecutable(Executable):
                                            avg_logprobs)
         self._expanded.append(expanded_batch)
 
-        if not self._to_exapand:
+        if not self._to_expand:
             self._time_step += 1
-            self._to_exapand = n_best(
+            self._to_expand = n_best(
                 self._beam_size, self._expanded, self._beam_scoring_f)
             self._expanded = []
 
         if self._time_step == self._decoder.max_output_len:
-            top_batch = self._to_exapand[-1].decoded.T
+            top_batch = self._to_expand[-1].decoded.T
+
             decoded_tokens = self._vocabulary.vectors_to_sentences(top_batch)
 
             if self._postprocess is not None:
