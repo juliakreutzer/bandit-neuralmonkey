@@ -6,12 +6,11 @@ import numpy as np
 import tensorflow as tf
 from termcolor import colored
 
-from neuralmonkey.logging import log, log_print, debug
+from neuralmonkey.logging import log, log_print
 from neuralmonkey.dataset import Dataset
 from neuralmonkey.tf_manager import TensorFlowManager
 from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
-from neuralmonkey.evaluators.bleu import BLEUEvaluator
 
 from neuralmonkey.tf_utils import gpu_memusage
 
@@ -39,6 +38,7 @@ def training_loop(tf_manager: TensorFlowManager,
                   validation_period: int=500,
                   runners_batch_size: Optional[int]=None,
                   postprocess: Callable=None,
+                  copypostprocess: Callable=None,
                   minimize_metric: bool=False,
                   store_gradients: bool=False,
                   batch_reward: bool=False):
@@ -57,6 +57,8 @@ def training_loop(tf_manager: TensorFlowManager,
         val_dataset:
         postprocess: Function that takes the output sentence as produced by the
             decoder and transforms into tokenized sentence.
+        copypostprocess: Function that takes input and output sentence and copies
+            part of the input to the output.
         log_directory: Directory where the TensordBoard log will be generated.
             If None, nothing will be done.
         evaluators: List of evaluators. The last evaluator is used as the main.
@@ -134,7 +136,7 @@ def training_loop(tf_manager: TensorFlowManager,
                         summaries=True)
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
-                        postprocess, write_out=False)
+                        postprocess, copypostprocess, write_out=False)
                     train_evaluation = evaluation(
                         evaluators, batch_dataset, runners,
                         train_results, train_outputs)
@@ -150,10 +152,12 @@ def training_loop(tf_manager: TensorFlowManager,
                                        train=True, summaries=False)
 
                 if step % validation_period == validation_period - 1:
+
                     val_results, val_outputs = run_on_dataset(
                         tf_manager, runners, val_dataset,
-                        postprocess, write_out=False,
+                        postprocess, copypostprocess, write_out=False,
                         batch_size=runners_batch_size)
+
                     val_evaluation = evaluation(
                         evaluators, val_dataset, runners, val_results,
                         val_outputs)
@@ -232,7 +236,7 @@ def training_loop(tf_manager: TensorFlowManager,
 
     for dataset in test_datasets:
         test_results, test_outputs = run_on_dataset(
-            tf_manager, runners, dataset, postprocess,
+            tf_manager, runners, dataset, postprocess, copypostprocess,
             write_out=True, batch_size=runners_batch_size)
         eval_result = evaluation(evaluators, dataset, runners,
                                  test_results, test_outputs)
@@ -260,6 +264,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                          validation_period: int=500,
                          runners_batch_size: Optional[int]=None,
                          postprocess: Callable=None,
+                         copypostprocess: Callable=None,
                          minimize_metric: bool=False,
                          store_gradients: bool=False,
                          batch_reward: bool=False):
@@ -276,6 +281,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
         val_dataset:
         postprocess: Function that takes the output sentence as produced by the
             decoder and transforms into tokenized sentence.
+        copypostprocess: Function that takes input and output sentence and copies
+            part of the input to the output.
         log_directory: Directory where the TensordBoard log will be generated.
             If None, nothing will be done.
         evaluators: List of evaluators. The last evaluator is used as the main.
@@ -340,7 +347,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
     log("Initial result on dev: ")
     val_results, val_outputs = run_on_dataset(
         tf_manager, runners, val_dataset,
-        postprocess, write_out=False,
+        postprocess, copypostprocess, write_out=False,
         batch_size=runners_batch_size)
     val_evaluation = evaluation(
         evaluators, val_dataset, runners, val_results,
@@ -424,6 +431,11 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             vectors_to_sentences(
                             neg_outputs_per_sample[s])  # FIXME ugly
 
+                        if copypostprocess is not None:
+                            inputs = batch_dataset.get_series("source")
+                            pos_sentences = copypostprocess(inputs, pos_sentences)
+                            neg_sentences = copypostprocess(inputs, neg_sentences)
+
                         desired_output = batch_dataset.get_series(dataset_id)
 
                         # evaluate whole batch as corpus
@@ -500,6 +512,10 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         sentences = trainer.objective.decoder.vocabulary.\
                             vectors_to_sentences(outputs_per_sample[s])  # FIXME ugly
 
+                        if copypostprocess is not None:
+                            inputs = batch_dataset.get_series("source")
+                            sentences = copypostprocess(inputs, sentences)
+
                         desired_output = batch_dataset.get_series(dataset_id)
 
                         # evaluate whole batch as corpus
@@ -553,7 +569,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 if step % logging_period == logging_period - 1:
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
-                        postprocess, write_out=False)
+                        postprocess, copypostprocess, write_out=False)
                     train_evaluation = evaluation(
                         evaluators, batch_dataset, runners,
                         train_results, train_outputs)
@@ -580,7 +596,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 if step % validation_period == validation_period - 1:
                     val_results, val_outputs = run_on_dataset(
                         tf_manager, runners, val_dataset,
-                        postprocess, write_out=False,
+                        postprocess, copypostprocess, write_out=False,
                         batch_size=runners_batch_size)
                     val_evaluation = evaluation(
                         evaluators, val_dataset, runners, val_results,
@@ -660,7 +676,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
     for dataset in test_datasets:
         test_results, test_outputs = run_on_dataset(
-            tf_manager, runners, dataset, postprocess,
+            tf_manager, runners, dataset, postprocess, copypostprocess,
             write_out=True, batch_size=runners_batch_size)
         eval_result = evaluation(evaluators, dataset, runners,
                                  test_results, test_outputs)
@@ -672,6 +688,7 @@ def run_on_dataset(tf_manager: TensorFlowManager,
                    runners: List[BaseRunner],
                    dataset: Dataset,
                    postprocess: Callable,
+                   copypostprocess: Callable,
                    write_out: bool=False,
                    batch_size: Optional[int]=None) \
                                                 -> Tuple[List[ExecutionResult],
@@ -708,6 +725,14 @@ def run_on_dataset(tf_manager: TensorFlowManager,
         result_data = postprocess(dataset, result_data_raw)
     else:
         result_data = result_data_raw
+
+    if copypostprocess is not None:
+        inputs = dataset.get_series("source")
+
+        for series_name, outputs in result_data.items():
+            #print("outputs {}".format(outputs))
+            copypostprocessed = copypostprocess(inputs, outputs)
+            result_data[series_name] = copypostprocessed
 
     if write_out:
         for series_id, data in result_data.items():

@@ -162,7 +162,7 @@ class Decoder(ModelPart):
                         for e in self.encoders
                         if isinstance(e, Attentive)}
 
-            self.train_rnn_outputs, _, _, _, _ = \
+            self.train_rnn_outputs, _, _, _, self.train_logits = \
                 self._attention_decoder(
                 embedded_go_symbols,
                 attention_on_input=attention_on_input,
@@ -181,13 +181,14 @@ class Decoder(ModelPart):
                     for e in self.encoders
                     if isinstance(e, Attentive)}
 
-            (self.runtime_rnn_outputs,
-             self.runtime_rnn_states, self.decoded, self.decoded_logprobs, self.runtime_logits) = \
+            self.runtime_rnn_outputs, self.runtime_rnn_states, self.decoded, \
+            self.decoded_logprobs, self.runtime_logits = \
                 self._attention_decoder(
                  embedded_go_symbols,
                  attention_on_input=attention_on_input,
                  train_mode=False,
                  sample_mode=0)
+
 
             self.hidden_states = self.runtime_rnn_outputs
 
@@ -198,9 +199,12 @@ class Decoder(ModelPart):
                     decoded = []
 
                     for out in rnn_outputs:
+
                         out_activation = self._logit_function(out)
                         logits.append(out_activation)
-                        decoded.append(tf.argmax(out_activation[:, 1:], 1) + 1)
+                        argmax_symb = tf.argmax(out_activation[:, 1:], 1) + 1
+
+                        decoded.append(argmax_symb)
 
                     return decoded, logits
 
@@ -488,12 +492,7 @@ class Decoder(ModelPart):
 
         cell = self._get_rnn_cell()
 
-        if sample_mode == 0:
-            log("Greedy decoding")
-        elif sample_mode > 0:
-            log("Sampling k={} from logits".format(sample_mode))
-        elif sample_mode < 0:
-            log("Sampling k={} from negated logits".format(-sample_mode))
+        unk_id = self.vocabulary.get_unk_id()
 
         outputs = []
         states = []
@@ -570,7 +569,16 @@ class Decoder(ModelPart):
                             prev_word_index = tf.squeeze(prev_word_index, [1])
 
                         inp = self._embed_and_dropout(prev_word_index)
-                        predictions.append(prev_word_index)
+
+                        # if predicted word is UNK, replace with negative index of maximally aligned source word
+                        def replace_unk(x):
+                            i, j = tf.unpack(x)
+                            return tf.cond(tf.equal(i, unk_id), lambda: (-j), lambda: (i))
+                        argmax_attention = tf.cast(tf.argmax(attns[0], 1), tf.int32)  # TODO only first attention object used
+                        symb_and_att = tf.pack([prev_word_index, argmax_attention], 1)
+                        unk_replaced = tf.map_fn(lambda x: replace_unk(x), symb_and_att)
+
+                        predictions.append(unk_replaced)
 
                 if abs(sample_mode) <= 1:
 

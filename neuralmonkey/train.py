@@ -39,6 +39,7 @@ def create_config() -> Configuration:
                         required=False, default=None)
     config.add_argument('minimize', bool, required=False, default=False)
     config.add_argument('postprocess')
+    config.add_argument('copypostprocess')
     config.add_argument('name', str)
     config.add_argument('random_seed', int, required=False)
     config.add_argument('initial_variables', str, required=False, default=[])
@@ -190,6 +191,7 @@ def main() -> None:
                   logging_period=cfg.model.logging_period,
                   validation_period=cfg.model.validation_period,
                   postprocess=cfg.model.postprocess,
+                  copypostprocess=cfg.model.copypostprocess,
                   runners_batch_size=cfg.model.runners_batch_size,
                   minimize_metric=cfg.model.minimize,
                   store_gradients=cfg.model.store_gradients,
