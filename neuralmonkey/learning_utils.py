@@ -493,7 +493,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                     outputs_per_sample = np.array_split(sampled_outputs, number_of_samples, axis=2)
                     # sampled_logprobs has shape: batch_size x sample_size
                     logprobs_per_sample = np.array_split(sampled_logprobs, number_of_samples, axis=1)
-                    #sample_arrays = [np.squeeze(o, 1) for o in sampled_outputs]
+
                     for s in range(number_of_samples):
                         sample_rewards = []
                         # ids to words
@@ -515,6 +515,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         # evaluate every sentence separately
                         else:
                             i = 1
+                            # iterate over batch
                             for d, g, s, p in zip(desired_output, sentences_greedy,
                                                   sentences, logprobs_per_sample[s]):
                                 r = function([s], [d])
@@ -522,7 +523,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                                 # TODO no binary version here yet
 
-                                if len(rewards) <= 5\
+                                if len(sample_rewards) <= 5\
                                         and step % logging_period == 0:
                                     log("[Example {}]\nref: {}\ngreedy: {}\nsample: "
                                         "{}\nlogprob: {}\n{}: {}".format(i,
@@ -534,7 +535,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                     i += 1
                         rewards.append(sample_rewards)
 
-                rewards = np.array(rewards).transpose()
+                rewards = np.array(rewards).transpose()  # batch_size x sample_size
                 summaries_bool = step % logging_period == logging_period - 1
 
                 # update model with samples and their rewards

@@ -162,7 +162,8 @@ class Decoder(ModelPart):
                         for e in self.encoders
                         if isinstance(e, Attentive)}
 
-            self.train_rnn_outputs, _ = self._attention_decoder(
+            self.train_rnn_outputs, _, _, _, _ = \
+                self._attention_decoder(
                 embedded_go_symbols,
                 attention_on_input=attention_on_input,
                 train_inputs=embedded_train_inputs,
@@ -181,13 +182,16 @@ class Decoder(ModelPart):
                     if isinstance(e, Attentive)}
 
             (self.runtime_rnn_outputs,
-             self.runtime_rnn_states) = self._attention_decoder(
+             self.runtime_rnn_states, self.decoded, self.decoded_logprobs, self.runtime_logits) = \
+                self._attention_decoder(
                  embedded_go_symbols,
                  attention_on_input=attention_on_input,
-                 train_mode=False)
+                 train_mode=False,
+                 sample_mode=0)
 
             self.hidden_states = self.runtime_rnn_outputs
 
+            # TODO remove this and get train_logits within attention_decoder
             def decode(rnn_outputs):
                 with tf.name_scope("output_projection"):
                     logits = []
@@ -212,9 +216,6 @@ class Decoder(ModelPart):
             self.train_logprobs = [tf.nn.log_softmax(l)
                                    for l in self.train_logits]
 
-            self.decoded, self.runtime_logits = decode(
-                self.runtime_rnn_outputs)
-
             self.runtime_loss = tf.nn.seq2seq.sequence_loss(
                 self.runtime_logits, train_targets,
                 tf.unpack(self.train_padding), len(self.vocabulary))
@@ -229,21 +230,39 @@ class Decoder(ModelPart):
                                           name="rewards")
             self.epoch = tf.placeholder(tf.int32, [], name="epoch")
 
-            sample_logprobs_time, sample_ids = self.sample_batch(neg=False, sample_size=self.sample_size)  # timestep-length list of batch_size x sample_size
-            self.sample_ids = tf.pack(sample_ids)  # time x batch x sample_size
-            sample_logprobs_time = tf.pack(sample_logprobs_time)
-            self.sample_logprobs = tf.reduce_sum(sample_logprobs_time, 0)  # batch x sample_size for full sequence
+            (sample_rnn_outputs,
+             sample_rnn_states, sample_ids, sample_logprobs_time,
+             sample_logits) = \
+                self._attention_decoder(
+                    embedded_go_symbols,
+                    attention_on_input=attention_on_input,
+                    train_mode=False,
+                    sample_mode=self.sample_size)
 
+            # TODO expand dim is only for now when sample size is 1
+            self.sample_ids = tf.expand_dims(tf.pack(sample_ids), 2)  # time x batch x sample_size
+            sample_logprobs_time_packed = tf.pack(sample_logprobs_time)  # time x batch x sample_size
+            self.sample_logprobs = tf.reduce_sum(sample_logprobs_time_packed, [0])  # batch x sample_size for full sequence
             self.sample_probs = tf.exp(self.sample_logprobs)  # batch_size x sample_size
 
             # second sample, needed for pairwise bandit objectives
-            # TODO find other way of sampling pairs
-            sample_logprobs_time_2, sample_ids_2 = self.sample_batch(neg=True, sample_size=self.sample_size)
-            self.sample_ids_2 = tf.pack(sample_ids_2)
-            sample_logprobs_time_2 = tf.pack(sample_logprobs_time_2)
-            self.sample_logprobs_2 = tf.reduce_sum(sample_logprobs_time_2, 0)  # batch x sample_size
-            self.sample_probs_2 = tf.exp(self.sample_logprobs_2)
-            self.pair_logprobs = self.sample_logprobs+self.sample_logprobs_2
+            (sample_rnn_outputs_2,
+             sample_rnn_states_2, sample_ids_2, sample_logprobs_time_2,
+             sample_logits_2) = \
+                self._attention_decoder(
+                    embedded_go_symbols,
+                    attention_on_input=attention_on_input,
+                    train_mode=False,
+                    sample_mode=-self.sample_size)
+
+            # TODO expand dim is only for now when sample size is 1
+            self.sample_ids_2 = tf.expand_dims(tf.pack(sample_ids_2), 2)  # time x batch x sample_size
+            sample_logprobs_time_2 = tf.pack(sample_logprobs_time_2)  # time x batch x sample_size
+            self.sample_logprobs_2 = tf.reduce_sum(sample_logprobs_time_2, [0])  # batch x sample_size for full sequence
+            self.sample_probs_2 = tf.exp(self.sample_logprobs)  # batch_size x sample_size
+
+            # pairs of samples
+            self.pair_logprobs = self.sample_logprobs + self.sample_logprobs_2
             self.pair_probs = tf.exp(self.pair_logprobs)
 
             # summaries
@@ -445,8 +464,9 @@ class Decoder(ModelPart):
             train_inputs: tf.Tensor=None,
             attention_on_input=True,
             train_mode: bool=False,
-            scope: Union[str, tf.VariableScope]=None) -> Tuple[
-                List[tf.Tensor], List[tf.Tensor]]:
+            scope: Union[str, tf.VariableScope]=None,
+            sample_mode: int=0) -> Tuple[
+                List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor]]:
         """Run the decoder RNN.
 
         Arguments:
@@ -459,6 +479,8 @@ class Decoder(ModelPart):
                 train (with ground truth inputs) or runtime mode (with inputs
                 decoded using the loop function)
             scope: Variable scope to use
+            sample_mode: -k: sampling k times from negative logits,
+                k: sampling k times from logits, 0: greedy
         """
         att_objects = [self.get_attention_object(e, train_mode)
                        for e in self.encoders]
@@ -466,8 +488,18 @@ class Decoder(ModelPart):
 
         cell = self._get_rnn_cell()
 
+        if sample_mode == 0:
+            log("Greedy decoding")
+        elif sample_mode > 0:
+            log("Sampling k={} from logits".format(sample_mode))
+        elif sample_mode < 0:
+            log("Sampling k={} from negated logits".format(-sample_mode))
+
         outputs = []
         states = []
+        predictions = []
+        logprobs_predicted = []
+        logits = []
 
         with tf.variable_scope(scope or "attention_decoder"):
             if self._rnn_cell == 'GRU':
@@ -484,47 +516,94 @@ class Decoder(ModelPart):
 
             attns = [tf.zeros([self.batch_size, a.attn_size])
                      for a in att_objects]
-            for i in range(self.max_output_len):
+
+            for i in range(self.max_output_len+1):
                 if i > 0:
                     tf.get_variable_scope().reuse_variables()
 
                 if prev is None:
                     assert i == 0
                     inp = go_symbols[0]
+
                 elif train_mode:
-                    inp = train_inputs[i - 1]
+                    if i < self.max_output_len:
+                        inp = train_inputs[i - 1]
+                    else:  # we need one less input for train_mode
+                        break
                 else:
+                    # during runtime find index for output word by:
+                        # 1) greedy decoding (i.e. taking the argmax of the logits)
+                        # 2) sampling, either from positive or negative logits
                     with tf.variable_scope("loop_function", reuse=True):
+
                         out_activation = self._logit_function(prev)
-                        prev_word_index = tf.argmax(out_activation, 1)
+                        batch_size = tf.shape(out_activation)[0]
+                        logits.append(out_activation)
+
+                        if sample_mode == 0:
+                            # greedy
+                            prev_word_index = tf.cast(tf.argmax(out_activation, 1), tf.int32)
+                            flat_p = tf.reshape(out_activation, [-1])
+
+                        else:
+                            if sample_mode > 0:
+                                # from positive logits
+                                prev_word_index = tf.cast(tf.multinomial(out_activation, sample_mode),
+                                                    tf.int32)  # batch_size x sample_size
+                                flat_p = tf.reshape(out_activation, [-1])
+
+                            elif sample_mode < 0:
+                                # from negative logits
+                                # TODO make more sophisticated
+                                prev_word_index = tf.cast(tf.multinomial(-out_activation, -sample_mode),
+                                                    tf.int32) # batch_size x sample_size
+                                flat_p = tf.reshape(-out_activation, [-1])
+
+                            to_add = tf.reshape(
+                                tf.range(0, batch_size * len(self.vocabulary),
+                                         len(self.vocabulary)),
+                                [batch_size, -1])
+
+                            indices = prev_word_index + to_add
+                            sample_logprob = tf.gather(flat_p, indices) # batch_size x sample_size
+                            logprobs_predicted.append(sample_logprob)
+                            prev_word_index = tf.squeeze(prev_word_index, [1])
+
                         inp = self._embed_and_dropout(prev_word_index)
+                        predictions.append(prev_word_index)
 
-                # Merge input and previous attentions into one vector of the
-                # right size.
-                if attention_on_input:
-                    x = linear([inp] + attns, self.embedding_size)
-                else:
-                    x = inp
-                # Run the RNN.
+                if abs(sample_mode) <= 1:
 
-                cell_output, state = cell(x, state)
-                states.append(state)
-                # Run the attention mechanism.
-
-                attns = [a.attention(cell_output) for a in att_objects]
-
-                with tf.name_scope("rnn_output_projection"):
-                    if attns:
-                        output = linear([cell_output] + attns,
-                                        cell.output_size,
-                                        scope="AttnOutputProjection")
+                    # Merge input and previous attentions into one vector of the
+                    # right size.
+                    if attention_on_input:
+                        x = linear([inp] + attns, self.embedding_size)
                     else:
-                        output = cell_output
+                        x = inp
+                    # Run the RNN.
+
+                    cell_output, state = cell(x, state)
+                    states.append(state)
+                    # Run the attention mechanism.
+
+                    attns = [a.attention(cell_output) for a in att_objects]
+
+                    with tf.name_scope("rnn_output_projection"):
+                        if attns:
+                            output = linear([cell_output] + attns,
+                                            cell.output_size,
+                                            scope="AttnOutputProjection")
+                        else:
+                            output = cell_output
+
+                else:
+                    raise NotImplementedError(
+                        "Multiple samples are not implemented yet")
 
                 prev = output
                 outputs.append(output)
 
-        return outputs, states
+        return outputs, states, predictions, logprobs_predicted, logits
 
     def _visualize_attention(self, neg=False):
         """Create image summaries with attentions"""

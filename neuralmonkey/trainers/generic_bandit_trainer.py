@@ -87,6 +87,7 @@ class GenericBanditTrainer(object):
 
             self.sample_op = self.objective.samples, \
                              self.objective.sample_logprobs
+
             self.greedy_op = self.objective.decoder.decoded
 
             self.update_op = self.optimizer.apply_gradients(self.all_gradients)
@@ -274,7 +275,8 @@ class SampleBanditExecutable(BanditExecutable):
         sampled_outputs, sampled_logprobs = results[0]['sample_op']
         greedy_outputs = results[0]['greedy_op']
         reg_cost = results[0]['reg_cost']
-        outputs = sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost  # TODO make summaries for these values
+        outputs = sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost
+        # TODO make summaries for these values
         self.result = BanditExecutionResult(
             [outputs], loss=None,
             scalar_summaries=scalar_summaries,
