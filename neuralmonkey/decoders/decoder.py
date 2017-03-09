@@ -574,7 +574,9 @@ class Decoder(ModelPart):
                         def replace_unk(x):
                             i, j = tf.unpack(x)
                             return tf.cond(tf.equal(i, unk_id), lambda: (-j), lambda: (i))
-                        argmax_attention = tf.cast(tf.argmax(attns[0], 1), tf.int32)  # TODO only first attention object used
+
+                        attns_time = [a.attentions_in_time[-1] for a in att_objects]
+                        argmax_attention = tf.cast(tf.argmax(attns_time[0], 1), tf.int32)  # TODO only first attention object used
                         symb_and_att = tf.pack([prev_word_index, argmax_attention], 1)
                         unk_replaced = tf.map_fn(lambda x: replace_unk(x), symb_and_att)
 
