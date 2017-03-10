@@ -398,10 +398,7 @@ class Vocabulary(collections.Sized):
         # type: List[List[str]]
 
         for vec in vectors:
-            #print("vector: {}".format(vec))
             for sentence, word_i in zip(sentences, vec):
-                #print("sentence: {}".format(sentence))
-                #print("word_i: {}".format(word_i))
                 if not sentence or sentence[-1] != END_TOKEN:
                     word_i = np.asscalar(word_i)
                     if word_i >= 0:

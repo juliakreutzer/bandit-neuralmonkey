@@ -10,6 +10,9 @@ class UNKCopyPostProcessor(object):
     def __init__(self, **kwargs):
         self.separator = kwargs.get("separator", "-")
         self.unk_symbol = kwargs.get("unk_symbol", "UNK")
+        self.pad_symbol = kwargs.get("pad_symbol", "<pad>")
+        self.start_symbol = kwargs.get("start_symbol", "<s>")
+        self.end_symbol = kwargs.get("end_symbol", "</s>")
 
         esc = re.escape(self.separator)
         self.pattern = \
@@ -37,6 +40,12 @@ class UNKCopyPostProcessor(object):
                     target_sentence[i] = ""
                 else:
                     target_sentence[i] = source_sentence[replace_index]
+
+        target_sentence = [t for t in target_sentence
+                           if t != self.pad_symbol
+                           and t != self.start_symbol
+                           and t != self.end_symbol
+                           and t != ""]
 
         return target_sentence
 

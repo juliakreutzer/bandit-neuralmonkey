@@ -391,6 +391,11 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 sentences_greedy = trainer.objective.decoder.vocabulary. \
                     vectors_to_sentences(greedy_outputs)
 
+                if copypostprocess is not None:
+                    inputs = batch_dataset.get_series("source")
+                    sentences_greedy = copypostprocess(inputs, sentences_greedy)
+
+
                 # evaluate samples
                 dataset_id, function = trainer.evaluator
 
