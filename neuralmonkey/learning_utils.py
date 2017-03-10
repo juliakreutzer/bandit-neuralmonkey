@@ -907,18 +907,18 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                                 translation_response = api_instance.send_translation(t)
                                 r = translation_response.score
                             except ApiException as e:
-                                print("Exception when calling send_translation:"
+                                log_print("Exception when calling send_translation:"
                                       " {}\n".format(e))
 
                         sample_rewards.append(r)
 
                         if len(sample_rewards) <= 5\
-                                and step % logging_period == 0:
-                            print("WMT incoming sentence {}: {}".format(
+                                and step % logging_period == logging_period - 1:
+                            log_print("WMT incoming sentence {}: {}".format(
                                 seen_instances, wmt_sentence))
-                            print("Translation sent back {}: {}".format(
+                            log_print("Translation sent back {}: {}".format(
                                 seen_instances, translation_str))
-                            print("Score: {}".format(r))
+                            log_print("Score: {}".format(r))
                     rewards.append(sample_rewards)
 
             rewards = np.array(rewards).transpose()  # batch_size x sample_size
