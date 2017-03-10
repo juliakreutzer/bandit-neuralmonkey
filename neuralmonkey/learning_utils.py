@@ -14,6 +14,9 @@ from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
 
 from neuralmonkey.tf_utils import gpu_memusage
 
+import wmt_client_python
+from wmt_client_python.rest import ApiException
+
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
 EvalConfiguration = List[Union[Tuple[str, Any], Tuple[str, str, Any]]]
@@ -244,8 +247,6 @@ def training_loop(tf_manager: TensorFlowManager,
 
     log("Finished.")
 
-
-# pylint: disable=too-many-arguments, too-many-locals, too-many-branches
 def bandit_training_loop(tf_manager: TensorFlowManager,
                          epochs: int,
                          trainer: GenericBanditTrainer,
@@ -271,7 +272,6 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
     """
     Performs the training loop for given graph and data.
-
     Args:
         tf_manager: TensorFlowManager with initialized sessions.
         epochs: Number of epochs for which the algorithm will learn.
@@ -674,6 +674,344 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
         log("Training interrupted by user.")
 
     log("Training finished. Maximum {} on validation data: {:.4g}, epoch {}"
+        .format(main_metric, best_score, best_score_epoch))
+
+    if test_datasets and os.path.islink(link_best_vars):
+        tf_manager.restore(link_best_vars)
+
+    for dataset in test_datasets:
+        test_results, test_outputs = run_on_dataset(
+            tf_manager, runners, dataset, postprocess, copypostprocess,
+            write_out=True, batch_size=runners_batch_size)
+        eval_result = evaluation(evaluators, dataset, runners,
+                                 test_results, test_outputs)
+        print_final_evaluation(dataset.name, eval_result)
+
+log("Finished.")
+
+# pylint: disable=too-many-arguments, too-many-locals, too-many-branches
+def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
+                         epochs: int,
+                         trainer: GenericBanditTrainer,
+                         batch_size: int,
+                         train_dataset: Dataset,
+                         val_dataset: Dataset,
+                         log_directory: str,
+                         valuelog_dirs: List[str],
+                         evaluators: EvalConfiguration,
+                         runners: List[BaseRunner],
+                         test_datasets: Optional[List[Dataset]]=None,
+                         save_n_best_vars: int=1,
+                         link_best_vars="/tmp/variables.data.best",
+                         vars_prefix="/tmp/variables.data",
+                         logging_period: int=20,
+                         validation_period: int=500,
+                         runners_batch_size: Optional[int]=None,
+                         postprocess: Callable=None,
+                         copypostprocess: Callable=None,
+                         minimize_metric: bool=False,
+                         store_gradients: bool=False,
+                         batch_reward: bool=False):
+
+    """
+    Performs the training loop for given graph and WMT data.
+
+    Args:
+        tf_manager: TensorFlowManager with initialized sessions.
+        epochs: Number of epochs for which the algorithm will learn.
+        trainer: The trainer object containg the TensorFlow code for computing
+            the loss and optimization operation.
+        train_dataset:
+        val_dataset:
+        postprocess: Function that takes the output sentence as produced by the
+            decoder and transforms into tokenized sentence.
+        copypostprocess: Function that takes input and output sentence and copies
+            part of the input to the output.
+        log_directory: Directory where the TensordBoard log will be generated.
+            If None, nothing will be done.
+        evaluators: List of evaluators. The last evaluator is used as the main.
+            An evaluator is a tuple of the name of the generated series, the
+            name of the dataset series the generated one is evaluated with and
+            the evaluation function. If only one series names is provided, it
+            means the generated and dataset series have the same name.
+        runners: List of runners.
+        test_datasets: List of datasets for testing.
+        link_best_vars: Link to best variables.
+        vars_prefix: Prefix for variables to store.
+        logging_period: log the process on training data every x batches.
+        validation_period: log the process on validation data every x batches.
+        runners_batch_size: batch size for runner.
+        postprocess: post-processor.
+        minimize_metric: whether to minimize the validation metric or not
+            (should be True for e.g. TER, but False for BLEU).
+        store_gradients: whether to store the gradients, updates and rewards
+            with logging.
+        batch_reward: compute the reward on the whole batch, not on each sample.
+    """
+
+    evaluators = [(e[0], e[0], e[1]) if len(e) == 2 else e
+                  for e in evaluators]
+
+    main_metric = "{}/{}".format(evaluators[-1][0], evaluators[-1][-1].name)
+    step = 0
+    seen_instances = 0
+
+    if save_n_best_vars < 1:
+        raise Exception('save_n_best_vars must be greater than zero')
+
+    if store_gradients:
+        log("Storing gradients and updates")
+
+    if save_n_best_vars == 1:
+        variables_files = [vars_prefix]
+    elif save_n_best_vars > 1:
+        variables_files = ['{}.{}'.format(vars_prefix, i)
+                           for i in range(save_n_best_vars)]
+
+    if minimize_metric:
+        saved_scores = [np.inf for _ in range(save_n_best_vars)]
+        best_score = np.inf
+    else:
+        saved_scores = [-np.inf for _ in range(save_n_best_vars)]
+        best_score = -np.inf
+
+    tf_manager.save(variables_files[0])
+
+    if os.path.islink(link_best_vars):
+        # if overwriting output dir
+        os.unlink(link_best_vars)
+    os.symlink(os.path.basename(variables_files[0]), link_best_vars)
+
+    if log_directory:
+        log("Initializing TensorBoard summary writer.")
+        tb_writer = tf.train.SummaryWriter(log_directory,
+                                           tf_manager.sessions[0].graph)
+        log("TensorBoard writer initialized.")
+
+    log("Initial result on dev: ")
+    val_results, val_outputs = run_on_dataset(
+        tf_manager, runners, val_dataset,
+        postprocess, copypostprocess, write_out=False,
+        batch_size=runners_batch_size)
+    val_evaluation = evaluation(
+        evaluators, val_dataset, runners, val_results,
+       val_outputs)
+    if log_directory:
+        _log_continuous_evaluation(tb_writer, tf_manager,
+                                   main_metric,
+                                   val_evaluation,
+                                   seen_instances, 0,
+                                   epochs,
+                                   val_results, train=False)
+
+    best_score_epoch = 0
+    best_score_batch_no = 0
+
+    if store_gradients:
+        [os.makedirs(v, exist_ok=True) for v in valuelog_dirs]
+
+    wmt_client_python.configuration.api_key['x-api-key'] = tf_manager.get_api_key()
+    wmt_client_python.configuration.host = tf_manager.get_host()
+    api_instance = wmt_client_python.SharedTaskApi()
+
+    # TODO only for mock service
+    # REMOVE for training!
+    api_instance.reset_dataset()
+
+
+    log("Starting training")
+    training = True
+    try:
+        while training:
+
+            step += 1
+
+            tf_manager.init_bandits([trainer])
+
+            # request the next source sentence
+            wmt_sentence = None
+            sentence_id = None
+            while wmt_sentence is None:
+                try:
+                    api_response = api_instance.get_sentence()
+                    wmt_sentence = api_response.source
+                    sentence_id = api_response.id
+                except ApiException as e:
+                    print("Exception when calling get_sentence {}".format(e))
+                    if e.status == 404:
+                        print("Training ended!")
+                        training = False
+                        break
+
+            if not training:
+                break
+
+            seen_instances += 1
+
+            # received sentence as source series
+            batch_dataset = Dataset("wmt_input", {
+                "source": [wmt_sentence.split(" ")]}, {})
+
+            # sample an output for the requested sentence
+            sampling_result = tf_manager.execute_bandits(
+                batch_dataset, [trainer], epoch=0,  # TODO fix annealing: no epochs
+                update=False, summaries=True, rewards=None)
+            sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost = \
+                sampling_result[0].outputs[0]
+
+            # get greedy translation
+            sentences_greedy = trainer.objective.decoder.vocabulary. \
+                vectors_to_sentences(greedy_outputs)
+
+            if copypostprocess is not None:
+                inputs = batch_dataset.get_series("source")
+                sentences_greedy = copypostprocess(inputs, sentences_greedy)
+
+            # evaluate samples
+
+            rewards = []
+            # for objectives with pairs of samples
+            if trainer.pairwise:
+                raise NotImplementedError(
+                    "Pairwise Training is not possible for WMT 2017")
+
+            # for objectives without pairwise comparisons
+            else:
+                # sampled_output has shape: time_steps x batch_size x sample_size
+                number_of_samples = sampled_outputs.shape[2]
+                outputs_per_sample = np.array_split(sampled_outputs, number_of_samples, axis=2)
+                # sampled_logprobs has shape: batch_size x sample_size
+                logprobs_per_sample = np.array_split(sampled_logprobs, number_of_samples, axis=1)
+
+                for s in range(number_of_samples):
+                    sample_rewards = []
+                    # ids to words
+                    sentences = trainer.objective.decoder.vocabulary.\
+                        vectors_to_sentences(outputs_per_sample[s]) # FIXME ugly
+
+                    if copypostprocess is not None:
+                        inputs = batch_dataset.get_series("source")
+                        sentences = copypostprocess(inputs, sentences)
+
+                    # iterate over batch (is 1 in wmt) and get feedback
+                    for g, s, p in zip(sentences_greedy,
+                                       sentences, logprobs_per_sample[s]):
+                        r = None
+                        translation_str = " ".join(s)
+                        translation_id = sentence_id
+                        t = wmt_client_python.Translation(id=translation_id,
+                                                          translation=" ".join(s))
+
+                        while r is None:
+                            try:
+                                translation_response = api_instance.send_translation(t)
+                                r = translation_response.score
+                            except ApiException as e:
+                                print("Exception when calling send_translation:"
+                                      " {}\n".format(e))
+
+                        sample_rewards.append(r)
+
+                        if len(sample_rewards) <= 5\
+                                and step % logging_period == 0:
+                            print("WMT incoming sentence {}: {}".format(
+                                seen_instances, wmt_sentence))
+                            print("Translation sent back {}: {}".format(
+                                seen_instances, translation_str))
+                            print("Score: {}".format(r))
+                    rewards.append(sample_rewards)
+
+            rewards = np.array(rewards).transpose()  # batch_size x sample_size
+
+            # update model with samples and their rewards
+            update_result = tf_manager.execute_bandits(
+                batch_dataset, [trainer], update=True,
+                summaries=False, rewards=rewards, epoch=0,  # TODO fix annealing: no epochs
+                train=True
+            )
+            # summaries are False because they involve xent and target reference
+
+            stochastic_gradient, stochastic_update = update_result[0].outputs[0]
+
+            if step % logging_period == logging_period - 1:
+
+                log("loss: {}".format(update_result[0].loss), color='red')
+
+                # write out gradients, updates and rewards
+                if store_gradients:
+                    np.save("{}/{}".format(valuelog_dirs[0], seen_instances),
+                            stochastic_gradient)
+                    np.save("{}/{}".format(valuelog_dirs[1], seen_instances),
+                            stochastic_update)
+                    np.save("{}/{}".format(valuelog_dirs[2], seen_instances),
+                            rewards)
+
+            if step % validation_period == validation_period - 1:
+                val_results, val_outputs = run_on_dataset(
+                    tf_manager, runners, val_dataset,
+                    postprocess, copypostprocess, write_out=False,
+                    batch_size=runners_batch_size)
+                val_evaluation = evaluation(
+                    evaluators, val_dataset, runners, val_results,
+                    val_outputs)
+
+                this_score = val_evaluation[main_metric]
+
+                def is_better(score1, score2, minimize):
+                    if minimize:
+                        return score1 < score2
+                    else:
+                        return score1 > score2
+
+                def argworst(scores, minimize):
+                    if minimize:
+                        return np.argmax(scores)
+                    else:
+                        return np.argmin(scores)
+
+                if is_better(this_score, best_score, minimize_metric):
+                    best_score = this_score
+                    best_score_epoch = seen_instances
+                    best_score_batch_no = seen_instances
+
+                worst_index = argworst(saved_scores, minimize_metric)
+                worst_score = saved_scores[worst_index]
+
+                if is_better(this_score, worst_score, minimize_metric):
+                    # we need to save this score instead the worst score
+                    worst_var_file = variables_files[worst_index]
+                    tf_manager.save(worst_var_file)
+                    saved_scores[worst_index] = this_score
+                    log("Variable file saved in {}".format(worst_var_file))
+
+                    # update symlink
+                    if best_score == this_score:
+                        os.unlink(link_best_vars)
+                        os.symlink(os.path.basename(worst_var_file),
+                                   link_best_vars)
+
+                    log("Best scores saved so far: {}".format(
+                        saved_scores))
+
+                if this_score == best_score:
+                    best_score_str = colored("{:.4g}".format(best_score),
+                                             attrs=['bold'])
+                else:
+                    best_score_str = "{:.4g}".format(best_score)
+
+                log("best {} on validation: {} (in epoch {}, "
+                    "after batch number {})"
+                    .format(main_metric, best_score_str,
+                            best_score_epoch, best_score_batch_no),
+                    color='blue')
+
+                log_print("")
+                _print_examples(val_dataset, val_outputs)
+
+    except KeyboardInterrupt:
+        log("Training interrupted by user.")
+
+    log("Training finished. Maximum {} on validation data: {:.4g}, iteration {}"
         .format(main_metric, best_score, best_score_epoch))
 
     if test_datasets and os.path.islink(link_best_vars):

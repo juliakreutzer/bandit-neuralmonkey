@@ -13,7 +13,7 @@ import tensorflow as tf
 from neuralmonkey.checking import CheckingException, check_dataset_and_coders
 from neuralmonkey.logging import Logging, log
 from neuralmonkey.config.configuration import Configuration
-from neuralmonkey.learning_utils import training_loop, bandit_training_loop
+from neuralmonkey.learning_utils import training_loop, bandit_training_loop, bandit_training_loop_wmt
 from neuralmonkey.dataset import Dataset
 from neuralmonkey.tf_manager import TensorFlowManager
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer
@@ -47,6 +47,7 @@ def create_config() -> Configuration:
                         default=False)
     config.add_argument('store_gradients', bool, required=False, default=False)
     config.add_argument('batch_reward', bool, required=False, default=False)
+    config.add_argument('wmt', bool, required=False, default=False)
 
     return config
 
@@ -170,10 +171,14 @@ def main() -> None:
     if isinstance(cfg.model.trainer, GenericBanditTrainer):
         loop_function = bandit_training_loop
         log("Bandit Training.")
+        if cfg.model.wmt:
+            log("Online Learning for WMT")
+            loop_function = bandit_training_loop_wmt
 
     else:
         loop_function = training_loop
         log("Full Information Training.")
+
 
     loop_function(tf_manager=cfg.model.tf_manager,
                   epochs=cfg.model.epochs,

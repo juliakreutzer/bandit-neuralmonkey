@@ -32,7 +32,8 @@ class TensorFlowManager(object):
     def __init__(self, num_sessions, num_threads, save_n_best=1,
                  variable_files=None, gpu_allow_growth=True,
                  per_process_gpu_memory_fraction=1.0,
-                 report_gpu_memory_consumption=False):
+                 report_gpu_memory_consumption=False,
+                 api_key_file=None, host=None):
         """Initialize a TensorflowManager.
 
         At this moment the graph must already exist. This method initializes
@@ -66,6 +67,9 @@ class TensorFlowManager(object):
         for sess in self.sessions:
             sess.run(init_op)
         self.saver = tf.train.Saver(max_to_keep=self.saver_max_to_keep)
+
+        self.api_key = self.api_key_from_file(api_key_file)
+        self.host = host
 
         if variable_files:
             if len(variable_files) != num_sessions:
@@ -197,7 +201,7 @@ class TensorFlowManager(object):
                     else:
                         tensor_list_lengths.append(0)
 
-                feed_dict = _feed_dicts(batch, all_feedables, train=train)
+                feed_dict = _feed_dicts(batch, all_feedables, train=False)  # TODO is False because of bandit training
 
                 for fdict in additional_feed_dicts:
                     feed_dict.update(fdict)
@@ -263,6 +267,16 @@ class TensorFlowManager(object):
         for coder in all_coders:
             for session in self.sessions:
                 coder.load(session)
+
+    def api_key_from_file(self, file):
+        f = open(file, "r").read().strip()
+        return f
+
+    def get_api_key(self):
+        return self.api_key
+
+    def get_host(self):
+        return self.host
 
 
 def _feed_dicts(dataset, coders, train=False):
