@@ -68,7 +68,11 @@ class TensorFlowManager(object):
             sess.run(init_op)
         self.saver = tf.train.Saver(max_to_keep=self.saver_max_to_keep)
 
-        self.api_key = self.api_key_from_file(api_key_file)
+        if api_key_file is not None:
+            self.api_key = self.api_key_from_file(api_key_file)
+        else:
+            self.api_key = None
+
         self.host = host
 
         if variable_files:
