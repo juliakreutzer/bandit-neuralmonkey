@@ -49,7 +49,8 @@ class Decoder(ModelPart):
                  attention_on_input: bool=True,
                  save_checkpoint: Optional[str]=None,
                  load_checkpoint: Optional[str]=None,
-                 sample_size = 1) -> None:
+                 sample_size = 1,
+                 temperature = 1.0) -> None:
         """Create a refactored version of monster decoder.
 
         Arguments:
@@ -90,6 +91,7 @@ class Decoder(ModelPart):
         self.use_attention = use_attention
         self.embeddings_encoder = embeddings_encoder
         self._rnn_cell = rnn_cell
+        self.temperature = temperature
 
         if self.embedding_size is None and self.embeddings_encoder is None:
             raise ValueError("You must specify either embedding size or the "
@@ -167,7 +169,8 @@ class Decoder(ModelPart):
                 embedded_go_symbols,
                 attention_on_input=attention_on_input,
                 train_inputs=embedded_train_inputs,
-                train_mode=True)
+                train_mode=True,
+                temperature=self.temperature)
 
             assert not tf.get_variable_scope().reuse
             tf.get_variable_scope().reuse_variables()
@@ -187,7 +190,8 @@ class Decoder(ModelPart):
                  embedded_go_symbols,
                  attention_on_input=attention_on_input,
                  train_mode=False,
-                 sample_mode=0)
+                 sample_mode=0,
+                 temperature=self.temperature)
 
             decoded_logprobs_time_packed = tf.pack(decoded_logprobs_time)
             self.decoded_logprobs = tf.reduce_sum(decoded_logprobs_time_packed,
@@ -245,7 +249,8 @@ class Decoder(ModelPart):
                     embedded_go_symbols,
                     attention_on_input=attention_on_input,
                     train_mode=False,
-                    sample_mode=self.sample_size)
+                    sample_mode=self.sample_size,
+                    temperature=self.temperature)
 
             # TODO expand dim is only for now when sample size is 1
             self.sample_ids = tf.expand_dims(tf.pack(sample_ids), 2)  # time x batch x sample_size
@@ -473,7 +478,8 @@ class Decoder(ModelPart):
             attention_on_input=True,
             train_mode: bool=False,
             scope: Union[str, tf.VariableScope]=None,
-            sample_mode: int=0) -> Tuple[
+            sample_mode: int=0,
+            temperature: float=1.0) -> Tuple[
                 List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor]]:
         """Run the decoder RNN.
 
@@ -551,16 +557,19 @@ class Decoder(ModelPart):
                         else:
                             if sample_mode > 0:
                                 # from positive logits
-                                prev_word_index = tf.cast(tf.multinomial(out_activation, sample_mode),
-                                                    tf.int32)  # batch_size x sample_size
-                                flat_p = tf.reshape(out_activation, [-1])
+                                temperature = temperature
 
                             elif sample_mode < 0:
                                 # from negative logits
+                                temperature = -temperature
                                 # TODO make more sophisticated
-                                prev_word_index = tf.cast(tf.multinomial(-out_activation, -sample_mode),
-                                                    tf.int32) # batch_size x sample_size
-                                flat_p = tf.reshape(-out_activation, [-1])
+
+                            # TODO sample size fixed to 1
+                            prev_word_index = tf.cast(
+                                tf.multinomial(out_activation / temperature, 1),
+                                tf.int32)  # batch_size x sample_size
+                            flat_p = tf.reshape(out_activation / temperature,
+                                                [-1])
 
                         to_add = tf.reshape(
                             tf.range(0, batch_size * len(self.vocabulary),
