@@ -29,5 +29,10 @@ def sgd_optimizer(learning_rate=1e-4):
     return tf.train.GradientDescentOptimizer(learning_rate, name="SGDOptimizer")
 
 
+def momentum_optimizer(learning_rate=1e-4, momentum=1e-4):
+    return tf.train.MomentumOptimizer(learning_rate, momentum,
+                                      name="MomentumOptimizer")
+
+
 def variable(initial_value=0, trainable=False, **kwargs):
     return tf.Variable(initial_value, trainable, **kwargs)
