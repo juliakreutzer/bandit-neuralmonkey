@@ -123,9 +123,17 @@ class GenericBanditTrainer(object):
                     lr_t = optimizer._learning_rate
                     var_update = - lr_t * grad
 
+                elif isinstance(optimizer, tf.train.MomentumOptimizer):
+                    lr_t = optimizer._learning_rate
+                    v_t = optimizer.get_slot(var, "momentum")
+                    accum = v_t * optimizer._momentum + grad
+                    var_update = - lr_t * accum
+
                 # TODO implement this for adadelta etc.
                 else:
-                    raise NotImplementedError
+                    raise NotImplementedError(
+                        "Gradient tracking notimplemented for {}".format(
+                            optimizer))
 
                 flattened_gradients.append(tf.reshape(grad,[-1]))
                 flattened_updates.append(tf.reshape(var_update, [-1]))
