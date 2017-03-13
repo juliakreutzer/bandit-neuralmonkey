@@ -181,14 +181,18 @@ class Decoder(ModelPart):
                     for e in self.encoders
                     if isinstance(e, Attentive)}
 
-            self.runtime_rnn_outputs, self.runtime_rnn_states, self.decoded, \
-            self.decoded_logprobs, self.runtime_logits = \
+            self.runtime_rnn_outputs, self.runtime_rnn_states, decoded_ids, \
+            decoded_logprobs_time, self.runtime_logits = \
                 self._attention_decoder(
                  embedded_go_symbols,
                  attention_on_input=attention_on_input,
                  train_mode=False,
                  sample_mode=0)
 
+            decoded_logprobs_time_packed = tf.pack(decoded_logprobs_time)
+            self.decoded_logprobs = tf.reduce_sum(decoded_logprobs_time_packed,
+                                                 [0])
+            self.decoded = tf.expand_dims(tf.pack(decoded_ids), 2)
 
             self.hidden_states = self.runtime_rnn_outputs
 
@@ -541,7 +545,7 @@ class Decoder(ModelPart):
 
                         if sample_mode == 0:
                             # greedy
-                            prev_word_index = tf.cast(tf.argmax(out_activation, 1), tf.int32)
+                            prev_word_index = tf.expand_dims(tf.cast(tf.argmax(out_activation, 1), tf.int32), 1)
                             flat_p = tf.reshape(out_activation, [-1])
 
                         else:
@@ -558,15 +562,14 @@ class Decoder(ModelPart):
                                                     tf.int32) # batch_size x sample_size
                                 flat_p = tf.reshape(-out_activation, [-1])
 
-                            to_add = tf.reshape(
-                                tf.range(0, batch_size * len(self.vocabulary),
-                                         len(self.vocabulary)),
-                                [batch_size, -1])
+                        to_add = tf.reshape(
+                            tf.range(0, batch_size * len(self.vocabulary),
+                                     len(self.vocabulary)), [batch_size, -1])
 
-                            indices = prev_word_index + to_add
-                            sample_logprob = tf.gather(flat_p, indices) # batch_size x sample_size
-                            logprobs_predicted.append(sample_logprob)
-                            prev_word_index = tf.squeeze(prev_word_index, [1])
+                        indices = prev_word_index + to_add
+                        sample_logprob = tf.gather(flat_p, indices) # batch_size x sample_size
+                        logprobs_predicted.append(sample_logprob)
+                        prev_word_index = tf.squeeze(prev_word_index, [1])
 
                         inp = self._embed_and_dropout(prev_word_index)
 

@@ -8,6 +8,34 @@ import tensorflow as tf
 # tests; pylint,mypy
 
 
+def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
+    """Get exploit only objective from decoder."""
+    return BanditObjective(
+        name="{} - exploit_only".format(decoder.name),
+        decoder=decoder,
+        samples=decoder.decoded,  # TODO greedy output
+        sample_logprobs=decoder.decoded_logprobs,
+        loss=tf.reduce_mean(tf.mul(decoder.decoded_logprobs, -decoder.rewards),
+                             [0, 1]),
+        gradients=lambda grad_fun: grad_fun(
+            tf.reduce_mean(  # mean gradient of batch and samples
+                            decoder.decoded_logprobs *  # score function
+                            tf.stop_gradient(  # don't differentiate this
+                                            # loss from user feedback
+                                            -decoder.rewards +
+                                            # entropy regularizer T*(log p +1)
+                                            # T is annealed
+                                            _get_temperature(
+                                                initial_temperature,
+                                                decoder.epoch)
+                                            * (decoder.decoded_logprobs + 1)
+                            )
+            )
+        )
+    )
+
+
+
 def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
     """Get expected loss objective from decoder."""
     return BanditObjective(
@@ -133,6 +161,20 @@ def _get_temperature(initial_temperature, current_epoch):
     :return:
     """
     return initial_temperature/((tf.cast(current_epoch, tf.float32)+1)**1/3.)
+
+
+class ExploitOnlyTrainer(GenericBanditTrainer):
+    def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
+                 l2_weight=0., initial_temperature=0., clip_norm=False,
+                 optimizer=None, binary_feedback=False) -> None:
+        initial_temperature = initial_temperature
+        objective = exploit_only_objective(decoders[0],
+                                            initial_temperature=initial_temperature)
+        super(ExploitOnlyTrainer, self).__init__(
+            objective, evaluator, l1_weight, l2_weight,
+            clip_norm=clip_norm,
+            optimizer=optimizer, pairwise=False,
+            binary_feedback=binary_feedback)
 
 
 class ExpectedLossTrainer(GenericBanditTrainer):

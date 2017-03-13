@@ -35,6 +35,7 @@ CONFIG.ignore_argument('save_n_best')
 CONFIG.ignore_argument('overwrite_output_dir')
 CONFIG.ignore_argument('store_gradients')
 CONFIG.ignore_argument('batch_reward')
+CONFIG.ignore_argument('wmt')
 
 
 def default_variable_file(output_dir):
