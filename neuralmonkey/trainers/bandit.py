@@ -196,7 +196,7 @@ def _get_samples(decoder, neg=False):
             train_mode=False,
             sample_mode=sample_mode,
             temperature=decoder.temperature,
-            scope="decoder/attention_decoder")
+            scope="{}/attention_decoder".format(decoder.name))
     sample_ids = tf.expand_dims(tf.pack(sample_ids),
                                 2)  # time x batch x sample_size
     sample_logprobs_time_packed = tf.pack(
