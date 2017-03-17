@@ -347,7 +347,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
     log("Initial result on dev: ")
     val_results, val_outputs = run_on_dataset(
         tf_manager, runners, val_dataset,
-        postprocess, copypostprocess, write_out=False,
+        postprocess=None, copypostprocess=copypostprocess, write_out=False,  # TODO fix?
         batch_size=runners_batch_size)
     val_evaluation = evaluation(
         evaluators, val_dataset, runners, val_results,
@@ -384,12 +384,15 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 # sample, compute sample probs
                 sampling_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], epoch=epoch_n-1,
-                    update=False, summaries=True, rewards=None)
+                    update=False, summaries=False, rewards=None)
                 sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost = \
                     sampling_result[0].outputs[0]
 
                 sentences_greedy = trainer.objective.decoder.vocabulary. \
                     vectors_to_sentences(greedy_outputs)
+
+                if postprocess is not None:
+                    sentences_greedy = postprocess(sentences_greedy)
 
                 if copypostprocess is not None:
                     inputs = batch_dataset.get_series("source")
@@ -435,6 +438,10 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         neg_sentences = trainer.objective.decoder.vocabulary. \
                             vectors_to_sentences(
                             neg_outputs_per_sample[s])  # FIXME ugly
+ 
+                        if postprocess is not None:
+                            pos_sentences = postprocess(pos_sentences)
+                            neg_sentences = postprocess(neg_sentences)
 
                         if copypostprocess is not None:
                             inputs = batch_dataset.get_series("source")
@@ -517,6 +524,9 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         sentences = trainer.objective.decoder.vocabulary.\
                             vectors_to_sentences(outputs_per_sample[s])  # FIXME ugly
 
+                        if postprocess is not None:
+                            sentences = postprocess(sentences)
+
                         if copypostprocess is not None:
                             inputs = batch_dataset.get_series("source")
                             sentences = copypostprocess(inputs, sentences)
@@ -560,6 +570,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 summaries_bool = step % logging_period == logging_period - 1
 
                 # update model with samples and their rewards
+                summaries_bool = False  # TODO change back
                 update_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=True,
                     summaries=summaries_bool, rewards=rewards, epoch=epoch_n-1,
@@ -574,7 +585,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 if step % logging_period == logging_period - 1:
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
-                        postprocess, copypostprocess, write_out=False)
+                        postprocess=None, copypostprocess=copypostprocess, write_out=False)
                     train_evaluation = evaluation(
                         evaluators, batch_dataset, runners,
                         train_results, train_outputs)
@@ -601,7 +612,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 if step % validation_period == validation_period - 1:
                     val_results, val_outputs = run_on_dataset(
                         tf_manager, runners, val_dataset,
-                        postprocess, copypostprocess, write_out=False,
+                        postprocess=None, copypostprocess=copypostprocess, write_out=False,
                         batch_size=runners_batch_size)
                     val_evaluation = evaluation(
                         evaluators, val_dataset, runners, val_results,
@@ -681,7 +692,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
     for dataset in test_datasets:
         test_results, test_outputs = run_on_dataset(
-            tf_manager, runners, dataset, postprocess, copypostprocess,
+            tf_manager, runners, dataset, postprocess=None, copypostprocess=copypostprocess,
             write_out=True, batch_size=runners_batch_size)
         eval_result = evaluation(evaluators, dataset, runners,
                                  test_results, test_outputs)
@@ -1061,14 +1072,13 @@ def run_on_dataset(tf_manager: TensorFlowManager,
                                      compute_losses=contains_targets,
                                      batch_size=batch_size)
 
-    result_data_raw = {runner.output_series: result.outputs
+    result_data = {runner.output_series: result.outputs
                        for runner, result in zip(runners, all_results)}
 
     if postprocess is not None:
-        result_data = postprocess(dataset, result_data_raw)
-    else:
-        result_data = result_data_raw
-
+        for series_name, outputs in result_data.items():
+            result_data[series_name] = postprocess(outputs)
+         
     if copypostprocess is not None:
         inputs = dataset.get_series("source")
 
