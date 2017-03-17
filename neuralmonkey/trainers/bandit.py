@@ -1,5 +1,4 @@
 from typing import Any, List
-
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer, \
     BanditObjective, _clip_probs
 
@@ -41,6 +40,7 @@ def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
 def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
     """Get expected loss objective from decoder."""
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
+    decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
     return BanditObjective(
         name="{} - expected_loss".format(decoder.name),
         decoder=decoder,
@@ -71,6 +71,7 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
         -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
+    decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
     return BanditObjective(
         name="{} - cross-entropy".format(decoder.name),
         decoder=decoder,
@@ -101,9 +102,6 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
 def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
-
-    tf.get_variable_scope().reuse_variables()
-
     sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
     decoder.neg_sample_ix = neg_ix
 
@@ -187,6 +185,7 @@ def _get_temperature(initial_temperature, current_epoch):
 
 
 def _get_samples(decoder, neg=False):
+    tf.get_variable_scope().reuse_variables()
     sample_mode = decoder.sample_size
     if neg:
         sample_mode *= -1
@@ -196,7 +195,8 @@ def _get_samples(decoder, neg=False):
             attention_on_input=decoder.attention_on_input,
             train_mode=False,
             sample_mode=sample_mode,
-            temperature=decoder.temperature)
+            temperature=decoder.temperature,
+            scope="decoder/attention_decoder")
     sample_ids = tf.expand_dims(tf.pack(sample_ids),
                                 2)  # time x batch x sample_size
     sample_logprobs_time_packed = tf.pack(
