@@ -385,8 +385,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 sampling_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], epoch=epoch_n-1,
                     update=False, summaries=False, rewards=None)
-                sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost = \
-                    sampling_result[0].outputs[0]
+                sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost, \
+                neg_sample_index = sampling_result[0].outputs[0]
 
                 sentences_greedy = trainer.objective.decoder.vocabulary. \
                     vectors_to_sentences(greedy_outputs)
@@ -443,6 +443,10 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             pos_sentences = postprocess(pos_sentences)
                             neg_sentences = postprocess(neg_sentences)
 
+                        if postprocess is not None:
+                            pos_sentences = postprocess(pos_sentences)
+                            neg_sentences = postprocess(neg_sentences)
+
                         if copypostprocess is not None:
                             inputs = batch_dataset.get_series("source")
                             pos_sentences = copypostprocess(inputs, pos_sentences)
@@ -470,11 +474,12 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                         # evaluate every sentence pair separately
                         else:
-                            for d, g, s1, s2, p1, p2 in zip(desired_output,
+                            for d, g, s1, s2, p1, p2, idx in zip(desired_output,
                                                             sentences_greedy,
                                                             pos_sentences, neg_sentences,
                                                             pos_logprobs_per_sample[s],
-                                                            neg_logprobs_per_sample[s]):
+                                                            neg_logprobs_per_sample[s],
+                                                            neg_sample_index):
 
                                 r1 = function([s1], [d])
                                 r2 = function([s2], [d])
@@ -489,12 +494,20 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                 sample_rewards.append(reward)
 
                                 i = 1
+
+                                # check whether position for negative sampling is before EOS
+                                if idx >= len(s2):
+                                    neg_word = "<outside>"
+                                else:
+                                    neg_word = s2[idx]
+
                                 if len(rewards) <= 5 \
                                         and step % logging_period == 0:
                                     # TODO some evaluators might return error not reward
                                     log("[Example {}]\nref: {}\ngreedy: {}\nsample_1: {}"
                                         "\nlogprob: {}\n{}: {}\nsample_2: {}"
-                                        "\nlogprob: {}\n{}: {}".format(i,
+                                        "\nlogprob: {}\nneg sample ix: {} ({})"
+                                        "\n{}: {}".format(i,
                                                                    " ".join(d),
                                                                    " ".join(g),
                                                                    " ".join(s1),
@@ -503,6 +516,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                                                    r1,
                                                                    " ".join(s2),
                                                                    np.exp(p2),
+                                                                   idx, neg_word,
                                                                    function.name,
                                                                    r2))
                                     log("pair reward: {}, diff logprob: {}".
@@ -899,6 +913,9 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                     # ids to words
                     sentences = trainer.objective.decoder.vocabulary.\
                         vectors_to_sentences(outputs_per_sample[s]) # FIXME ugly
+
+                    if postprocess is not None:
+                        sentences = postprocess(sentences)
 
                     if copypostprocess is not None:
                         inputs = batch_dataset.get_series("source")

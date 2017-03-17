@@ -32,7 +32,6 @@ class GreedyRunner(BaseRunner):
             fetches = {"train_xent": tf.zeros([]),
                        "runtime_xent": tf.zeros([])}
 
-        fetches["decoded_logprobs"] = self._decoder.runtime_logprobs
         fetches["decoded"] = self._decoder.decoded
 
         if summaries and self.image_summaries is not None:
@@ -65,19 +64,13 @@ class GreedyRunExecutable(Executable):
     def collect_results(self, results: List[Dict]) -> None:
         train_loss = 0.
         runtime_loss = 0.
-        summed_logprobs = [-np.inf for _ in self._fetches["decoded_logprobs"]]
 
         for sess_result in results:
             train_loss += sess_result["train_xent"]
             runtime_loss += sess_result["runtime_xent"]
 
-            for i, logprob in enumerate(sess_result["decoded_logprobs"]):
-                summed_logprobs[i] = np.logaddexp(summed_logprobs[i], logprob)
-
         decoded_vectors = sess_result["decoded"]
-        #print("decoded vectors: {}".format(decoded_vectors))
         decoded_tokens = self._vocabulary.vectors_to_sentences(decoded_vectors)
-        #print("decoded tokens: {}".format(decoded_tokens))
 
         if self._postprocess is not None:
             decoded_tokens = self._postprocess(decoded_tokens)
