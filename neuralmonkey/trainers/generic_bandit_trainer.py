@@ -86,7 +86,8 @@ class GenericBanditTrainer(object):
             self.clip_norm = clip_norm
 
             self.sample_op = self.objective.samples, \
-                             self.objective.sample_logprobs
+                             self.objective.sample_logprobs, \
+                             self.objective.decoder.neg_sample_ix
 
             self.greedy_op = self.objective.decoder.decoded
 
@@ -280,10 +281,10 @@ class SampleBanditExecutable(BanditExecutable):
             scalar_summaries = results[0]['scalar_summaries']
             histogram_summaries = results[0]['histogram_summaries']
 
-        sampled_outputs, sampled_logprobs = results[0]['sample_op']
+        sampled_outputs, sampled_logprobs, neg_sample_ix = results[0]['sample_op']
         greedy_outputs = results[0]['greedy_op']
         reg_cost = results[0]['reg_cost']
-        outputs = sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost
+        outputs = sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost, neg_sample_ix
         # TODO make summaries for these values
         self.result = BanditExecutionResult(
             [outputs], loss=None,
@@ -293,11 +294,12 @@ class SampleBanditExecutable(BanditExecutable):
 
     def get_fetches(self):
         fetches = [self.regularization_cost]
-        samples, logprobs = self.sample_op
+        samples, logprobs, ix = self.sample_op
         greedy = self.greedy_op
         fetches.append(samples)
         fetches.append(logprobs)
         fetches.append(greedy)
+        fetches.append(ix)
         if self.scalar_summaries is not None:
             fetches.extend(self.scalar_summaries)
         if self.histogram_summaries is not None:
