@@ -35,7 +35,7 @@ class GenericBanditTrainer(object):
     def __init__(self, objective: BanditObjective, evaluator,
                  l1_weight=0.0, l2_weight=0.0,
                  clip_norm=False, optimizer=None, pairwise=False,
-                 binary_feedback=False, number_of_samples=1)\
+                 binary_feedback=False, number_of_samples=1, store_gradients=False)\
             -> None:
 
         with tf.name_scope("trainer"):
@@ -47,6 +47,8 @@ class GenericBanditTrainer(object):
             self.binary_feedback = binary_feedback
 
             self.evaluator = evaluator
+
+            print([v.name for v in tf.trainable_variables()])
 
             with tf.variable_scope('regularization'):
                 regularizable = [v for v in tf.trainable_variables()
@@ -103,44 +105,48 @@ class GenericBanditTrainer(object):
                                          collections=["summary_gradients"])
 
 
-            # prepare stochastic gradients to be fetched them from the graph
-            # sort gradients by variable name
-            sorted_gradients = sorted(self.all_gradients,
-                                      key=lambda tup: tup[1].name)
-            # flatten the gradients to one big vector to track them
-            flattened_gradients = []
-            flattened_updates = []
-            for grad, var in sorted_gradients:
 
-                if isinstance(optimizer, tf.train.AdamOptimizer):
-                    lr_t = optimizer._lr
-                    m_t = optimizer._beta1 * optimizer.get_slot(var, "m") + \
-                          (1-optimizer._beta1) * grad
-                    v_t = optimizer._beta2 * optimizer.get_slot(var, "v") + \
-                          (1-optimizer._beta2) * (grad*grad)
-                    var_update = - lr_t * m_t / (tf.sqrt(v_t) + optimizer._epsilon)
+            if store_gradients:
+                # prepare stochastic gradients to be fetched them from the graph
+                # sort gradients by variable name
+                sorted_gradients = sorted(self.all_gradients,
+                                          key=lambda tup: tup[1].name)
 
-                elif isinstance(optimizer, tf.train.GradientDescentOptimizer):
-                    lr_t = optimizer._learning_rate
-                    var_update = - lr_t * grad
+                # flatten the gradients to one big vector to track them
+                flattened_gradients = []
+                flattened_updates = []
 
-                elif isinstance(optimizer, tf.train.MomentumOptimizer):
-                    lr_t = optimizer._learning_rate
-                    v_t = optimizer.get_slot(var, "momentum")
-                    accum = v_t * optimizer._momentum + grad
-                    var_update = - lr_t * accum
+                for grad, var in sorted_gradients:
 
-                # TODO implement this for adadelta etc.
-                else:
-                    raise NotImplementedError(
-                        "Gradient tracking notimplemented for {}".format(
-                            optimizer))
+                    if isinstance(optimizer, tf.train.AdamOptimizer):
+                        lr_t = optimizer._lr
+                        m_t = optimizer._beta1 * optimizer.get_slot(var, "m") + \
+                              (1-optimizer._beta1) * grad
+                        v_t = optimizer._beta2 * optimizer.get_slot(var, "v") + \
+                              (1-optimizer._beta2) * (grad*grad)
+                        var_update = - lr_t * m_t / (tf.sqrt(v_t) + optimizer._epsilon)
 
-                flattened_gradients.append(tf.reshape(grad,[-1]))
-                flattened_updates.append(tf.reshape(var_update, [-1]))
+                    elif isinstance(optimizer, tf.train.GradientDescentOptimizer):
+                        lr_t = optimizer._learning_rate
+                        var_update = - lr_t * grad
 
-            self.concatenated_gradients = tf.concat(0, flattened_gradients)
-            self.concatenated_updates = tf.concat(0, flattened_updates)
+                    elif isinstance(optimizer, tf.train.MomentumOptimizer):
+                        lr_t = optimizer._learning_rate
+                        v_t = optimizer.get_slot(var, "momentum")
+                        accum = v_t * optimizer._momentum + grad
+                        var_update = - lr_t * accum
+
+                    # TODO implement this for adadelta etc.
+                    else:
+                        raise NotImplementedError(
+                            "Gradient tracking notimplemented for {}".format(
+                                optimizer))
+
+                    flattened_gradients.append(tf.reshape(grad,[-1]))
+                    flattened_updates.append(tf.reshape(var_update, [-1]))
+
+                self.concatenated_gradients = tf.concat(0, flattened_gradients)
+                self.concatenated_updates = tf.concat(0, flattened_updates)
 
             self.histogram_summaries = tf.merge_summary(
                 tf.get_collection("summary_gradients"))
@@ -153,19 +159,20 @@ class GenericBanditTrainer(object):
         return gradient_list
 
     # pylint: disable=unused-argument
-    def get_executable(self, update=False, summaries=True) \
+    def get_executable(self, update=False, summaries=True, store_gradients=False) \
             -> BanditExecutable:
+        outputs = [self.concatenated_gradients, self.concatenated_updates] if store_gradients else []
         if update:
             return UpdateBanditExecutable(self.all_coders,
                                           self.objective.decoder.rewards,
                                           self.objective.decoder.epoch,
                                           self.dummy, self.loss,
-                                          [self.concatenated_gradients,
-                                           self.concatenated_updates],
+                                          outputs,
                                           self.scalar_summaries
                                           if summaries else None,
                                           self.histogram_summaries
-                                          if summaries else None)
+                                          if summaries else None,
+                                          store_gradients=store_gradients)
         else:
             return SampleBanditExecutable(self.all_coders,
                                           self.sample_op,
@@ -200,7 +207,7 @@ def _clip_probs(probs, prob_threshold):
 class UpdateBanditExecutable(BanditExecutable):
 
     def __init__(self, all_coders, reward_placeholder, epoch_placeholder,
-                 update_op, loss, gradient, scalar_summaries, histogram_summaries):
+                 update_op, loss, gradient, scalar_summaries, histogram_summaries, store_gradients):
         self.all_coders = all_coders
         self.reward_placeholder = reward_placeholder
         self.epoch_placeholder = epoch_placeholder
@@ -209,6 +216,7 @@ class UpdateBanditExecutable(BanditExecutable):
         self.scalar_summaries = scalar_summaries
         self.histogram_summaries = histogram_summaries
         self.gradient = gradient
+        self.store_gradients = store_gradients
 
         self.result = None
 
@@ -218,7 +226,8 @@ class UpdateBanditExecutable(BanditExecutable):
             fetches['scalar_summaries'] = self.scalar_summaries
             fetches['histogram_summaries'] = self.histogram_summaries
         fetches['loss'] = self.loss
-        fetches['gradient'] = self.gradient
+        if self.store_gradients:
+            fetches['gradient'] = self.gradient
         feedables = self.all_coders
         # extra feed for reward
         return feedables, fetches, {self.reward_placeholder: reward,
@@ -232,14 +241,18 @@ class UpdateBanditExecutable(BanditExecutable):
             scalar_summaries = results[0]['scalar_summaries']
             histogram_summaries = results[0]['histogram_summaries']
 
+        gradient_result = results[0]['gradient'] if self.store_gradients else []
+
         self.result = BanditExecutionResult(
-            [results[0]['gradient']], loss=results[0]['loss'],
+            [gradient_result], loss=results[0]['loss'],
             scalar_summaries=scalar_summaries,
             histogram_summaries=histogram_summaries,
             image_summaries=None)
 
     def get_fetches(self):
-        fetches = [self.update_op, self.loss, self.gradient]
+        fetches = [self.update_op, self.loss]
+        if self.store_gradients:
+            fetches.append(self.gradient)
         if self.scalar_summaries is not None:
             fetches.append(self.scalar_summaries)
         if self.histogram_summaries is not None:

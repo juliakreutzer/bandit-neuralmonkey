@@ -171,7 +171,8 @@ class TensorFlowManager(object):
                         summaries=True,
                         batch_size=None,
                         rewards=None,
-                        update=False) -> List[BanditExecutionResult]:
+                        update=False,
+                        store_gradients=False) -> List[BanditExecutionResult]:
         if batch_size is None:
             batch_size = len(dataset)
         batched_dataset = dataset.batch_dataset(batch_size)
@@ -181,7 +182,7 @@ class TensorFlowManager(object):
         # type: List[List[BanditExecutionResult]]
         for batch in batched_dataset:
             executables = [s.get_executable(summaries=summaries,
-                                            update=update)
+                                            update=update, store_gradients=store_gradients)
                            for s in execution_scripts]
             while not all(ex.result is not None for ex in executables):
                 all_feedables = set()  # type: Set[Any]

@@ -588,10 +588,11 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 update_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=True,
                     summaries=summaries_bool, rewards=rewards, epoch=epoch_n-1,
-                    train=True
+                    train=True, store_gradients=store_gradients
                 )
 
-                stochastic_gradient, stochastic_update = update_result[0].outputs[0]
+                if store_gradients:
+                    stochastic_gradient, stochastic_update = update_result[0].outputs[0]
 
                 if step % logging_period == 0:
                     log("loss: {}".format(update_result[0].loss), color='red')
