@@ -194,7 +194,8 @@ class Decoder(ModelPart):
                  attention_on_input=attention_on_input,
                  train_mode=False,
                  sample_mode=0,
-                 temperature=self.temperature, store_logits=True)
+                 temperature=self.temperature, store_logits=True,
+                    store_rnn_outputs=True, store_rnn_states=True)
 
             self.decoded = tf.expand_dims(tf.pack(decoded_ids), 2)
 
@@ -338,7 +339,9 @@ class Decoder(ModelPart):
             scope: Union[str, tf.VariableScope]=None,
             sample_mode: int=0,
             temperature: float=1.0,
-            store_logits: bool=False) -> Tuple[
+            store_logits: bool=False,
+            store_rnn_outputs: bool=False,
+            store_rnn_states: bool=False) -> Tuple[
                 List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], tf.Tensor]:
         """Run the decoder RNN.
 
@@ -467,7 +470,9 @@ class Decoder(ModelPart):
                     # Run the RNN.
 
                     cell_output, state = cell(x, state)
-                    states.append(state)
+                    if store_rnn_states:
+                        states.append(state)
+
                     # Run the attention mechanism.
 
                     attns = [a.attention(cell_output) for a in att_objects]
@@ -485,7 +490,9 @@ class Decoder(ModelPart):
                         "Multiple samples are not implemented yet")
 
                 prev = output
-                outputs.append(output)
+
+                if store_rnn_outputs:
+                    outputs.append(output)
 
         return outputs, states, predictions, logprob_predicted, logits, ix-1
 
