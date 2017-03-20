@@ -414,29 +414,27 @@ class Decoder(ModelPart):
                     with tf.variable_scope("loop_function", reuse=True):
 
                         out_activation = self._logit_function(prev)
-                        batch_size = tf.shape(out_activation)[0]
                         logits.append(out_activation)
 
                         if sample_mode == 0:
                             # greedy
-                            prev_word_index = tf.expand_dims(tf.cast(tf.argmax(out_activation, 1), tf.int32), 1)
-                            flat_p = tf.reshape(out_activation, [-1])
+                            prev_word_index = tf.cast(tf.argmax(out_activation, 1), tf.int32)
 
                         else:
-
+                            # sampling
                             prev_word_index = tf.cast(
                                 tf.multinomial(out_activation/temp, 1),
                                 tf.int32)  # batch_size x sample_size
-                            flat_p = tf.reshape(out_activation/temp, [-1])
+                            prev_word_index = tf.squeeze(prev_word_index, [1])
 
-                        to_add = tf.reshape(
-                            tf.range(0, batch_size * len(self.vocabulary),
-                                     len(self.vocabulary)), [batch_size, -1])
+                        # compute log probabilities from logits
+                        logprobs = tf.nn.log_softmax(out_activation/temp)
 
-                        indices = prev_word_index + to_add
-                        sample_logprob = tf.gather(flat_p, indices) # batch_size x sample_size
-                        logprobs_predicted.append(sample_logprob)
-                        prev_word_index = tf.squeeze(prev_word_index, [1])
+                        # use dynamic partition to get the logprobs of the samples
+                        voc_size = len(self.vocabulary)
+                        partitions = tf.one_hot(prev_word_index, voc_size, dtype=tf.int32)
+                        sample_logprob = tf.dynamic_partition(logprobs, partitions=partitions, num_partitions=2)[1]
+                        logprobs_predicted.append([sample_logprob])
 
                         inp = self._embed_and_dropout(prev_word_index)
 
