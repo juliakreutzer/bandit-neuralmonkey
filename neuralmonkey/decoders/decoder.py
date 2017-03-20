@@ -172,7 +172,7 @@ class Decoder(ModelPart):
                 attention_on_input=self.attention_on_input,
                 train_inputs=embedded_train_inputs,
                 train_mode=True,
-                temperature=self.temperature)
+                temperature=self.temperature, store_logits=True)
 
             assert not tf.get_variable_scope().reuse
             tf.get_variable_scope().reuse_variables()
@@ -194,7 +194,7 @@ class Decoder(ModelPart):
                  attention_on_input=attention_on_input,
                  train_mode=False,
                  sample_mode=0,
-                 temperature=self.temperature)
+                 temperature=self.temperature, store_logits=True)
 
             self.decoded = tf.expand_dims(tf.pack(decoded_ids), 2)
 
@@ -206,12 +206,12 @@ class Decoder(ModelPart):
 
             self.train_loss = tf.nn.seq2seq.sequence_loss(
                 self.train_logits, train_targets,
-                tf.unpack(self.train_padding), len(self.vocabulary))
+                tf.unpack(self.train_padding))
             self.cost = self.train_loss
 
             self.runtime_loss = tf.nn.seq2seq.sequence_loss(
                 self.runtime_logits, train_targets,
-                tf.unpack(self.train_padding), len(self.vocabulary))
+                tf.unpack(self.train_padding))
 
             # sampling
             self.sample_size = sample_size
@@ -337,7 +337,8 @@ class Decoder(ModelPart):
             train_mode: bool=False,
             scope: Union[str, tf.VariableScope]=None,
             sample_mode: int=0,
-            temperature: float=1.0) -> Tuple[
+            temperature: float=1.0,
+            store_logits: bool=False) -> Tuple[
                 List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], tf.Tensor]:
         """Run the decoder RNN.
 
@@ -353,6 +354,8 @@ class Decoder(ModelPart):
             scope: Variable scope to use
             sample_mode: -k: sampling k times from negative logits,
                 k: sampling k times from logits, 0: greedy
+            temperature: softmax temperature for sampling
+            store_logits: whether to return the logits from every step
         """
         att_objects = [self.get_attention_object(e, train_mode)
                        for e in self.encoders]
@@ -365,7 +368,7 @@ class Decoder(ModelPart):
         outputs = []
         states = []
         predictions = []
-        logprobs_predicted = []
+        logprob_predicted = 0
         logits = []
 
         with tf.variable_scope(scope or "attention_decoder"):
@@ -402,10 +405,12 @@ class Decoder(ModelPart):
                     if i < self.max_output_len:
                         inp = train_inputs[i - 1]
                         out_activation = self._logit_function(prev)
-                        logits.append(out_activation)
+                        if store_logits:
+                            logits.append(out_activation)
                     else:
                         out_activation = self._logit_function(prev)
-                        logits.append(out_activation)
+                        if store_logits:
+                            logits.append(out_activation)
                         break
                 else:
                     # during runtime find index for output word by:
@@ -414,7 +419,8 @@ class Decoder(ModelPart):
                     with tf.variable_scope("loop_function", reuse=True):
 
                         out_activation = self._logit_function(prev)
-                        logits.append(out_activation)
+                        if store_logits:
+                            logits.append(out_activation)
 
                         if sample_mode == 0:
                             # greedy
@@ -433,8 +439,8 @@ class Decoder(ModelPart):
                         # use dynamic partition to get the logprobs of the samples
                         voc_size = len(self.vocabulary)
                         partitions = tf.one_hot(prev_word_index, voc_size, dtype=tf.int32)
-                        sample_logprob = tf.dynamic_partition(logprobs, partitions=partitions, num_partitions=2)[1]
-                        logprobs_predicted.append([sample_logprob])
+                        sample_logprob_word = tf.dynamic_partition(logprobs, partitions=partitions, num_partitions=2)[1]
+                        logprob_predicted += sample_logprob_word
 
                         inp = self._embed_and_dropout(prev_word_index)
 
@@ -481,7 +487,7 @@ class Decoder(ModelPart):
                 prev = output
                 outputs.append(output)
 
-        return outputs, states, predictions, logprobs_predicted, logits, ix-1
+        return outputs, states, predictions, logprob_predicted, logits, ix-1
 
     def _visualize_attention(self, neg=False):
         """Create image summaries with attentions"""
