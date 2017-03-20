@@ -136,9 +136,6 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
         -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
-
-    tf.get_variable_scope().reuse_variables()
-
     sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
     decoder.neg_sample_ix = neg_ix
 
@@ -187,9 +184,10 @@ def _get_temperature(initial_temperature, current_epoch):
 def _get_samples(decoder, neg=False):
     tf.get_variable_scope().reuse_variables()
     sample_mode = decoder.sample_size
+    # TODO so far only one sample
     if neg:
         sample_mode *= -1
-    _, _, sample_ids, sample_logprobs_time, _, neg_ix = \
+    _, _, sample_ids, sample_logprob, _, neg_ix = \
         decoder._attention_decoder(
             decoder.embedded_go_symbols,
             attention_on_input=decoder.attention_on_input,
@@ -197,12 +195,9 @@ def _get_samples(decoder, neg=False):
             sample_mode=sample_mode,
             temperature=decoder.temperature,
             scope="{}/attention_decoder".format(decoder.name))
-    sample_ids = tf.expand_dims(tf.pack(sample_ids),
-                                2)  # time x batch x sample_size
-    sample_logprobs_time_packed = tf.pack(
-        sample_logprobs_time)  # time x batch x sample_size
-    sample_logprobs = tf.reduce_sum(sample_logprobs_time_packed, [
-        0])  # batch x sample_size for full sequence
+    # expansion is necessary for generalization of processing of multiple samples
+    sample_ids = tf.expand_dims(tf.pack(sample_ids), 2)  # time x batch x sample_size
+    sample_logprobs = tf.expand_dims(sample_logprob, 1) # batch x sample_size
     return sample_ids, sample_logprobs, neg_ix
 
 
