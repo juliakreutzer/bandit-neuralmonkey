@@ -976,11 +976,11 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             update_result = tf_manager.execute_bandits(
                 batch_dataset, [trainer], update=True,
                 summaries=False, rewards=rewards, baseline=baseline, epoch=0,  # TODO fix annealing: no epochs
-                train=True
+                train=True, store_gradients=store_gradients
             )
             # summaries are False because they involve xent and target reference
-
-            stochastic_gradient, stochastic_update = update_result[0].outputs[0]
+            if store_gradients:
+                stochastic_gradient, stochastic_update = update_result[0].outputs[0]
 
             if step % logging_period == logging_period - 1:
 
