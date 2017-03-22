@@ -367,6 +367,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
         [os.makedirs(v, exist_ok=True) for v in valuelog_dirs]
 
     log("Starting training")
+    reward_sum = 0   # running sum over rewards
     try:
         for epoch_n in range(1, epochs + 1):
             log_print("")
@@ -384,7 +385,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 # sample, compute sample probs
                 sampling_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], epoch=epoch_n-1,
-                    update=False, summaries=False, rewards=None)
+                    update=False, summaries=False, rewards=None, baseline=None)
                 sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost, \
                 neg_sample_index = sampling_result[0].outputs[0]
 
@@ -581,13 +582,21 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         rewards.append(sample_rewards)
 
                 rewards = np.array(rewards).transpose()  # batch_size x sample_size
+                reward_sum += np.sum(rewards)
+
+                if trainer.baseline:
+                    baseline = reward_sum / float(seen_instances)
+                else:
+                    baseline = 0.0
+
                 summaries_bool = step % logging_period == logging_period - 1
 
                 # update model with samples and their rewards
                 summaries_bool = False  # TODO change back
                 update_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=True,
-                    summaries=summaries_bool, rewards=rewards, epoch=epoch_n-1,
+                    summaries=summaries_bool, rewards=rewards, baseline=baseline,
+                    epoch=epoch_n-1,
                     train=True, store_gradients=store_gradients
                 )
 
@@ -595,7 +604,10 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                     stochastic_gradient, stochastic_update = update_result[0].outputs[0]
 
                 if step % logging_period == 0:
-                    log("loss: {}".format(update_result[0].loss), color='red')
+                    log("Batch avg reward {}".format(np.mean(rewards)))
+                    log("Baseline {}".format(baseline))
+
+                    log("Loss: {}".format(update_result[0].loss), color='red')
 
                 if step % logging_period == logging_period - 1:
                     train_results, train_outputs = run_on_dataset(
@@ -846,6 +858,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
 
     log("Starting training")
+    reward_sum = 0   # running sum over rewards
     training = True
     try:
         while training:
@@ -952,10 +965,17 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
             rewards = np.array(rewards).transpose()  # batch_size x sample_size
 
+            reward_sum += np.sum(rewards)
+
+            if trainer.baseline:
+                baseline = reward_sum / float(seen_instances)
+            else:
+                baseline = 0.0
+
             # update model with samples and their rewards
             update_result = tf_manager.execute_bandits(
                 batch_dataset, [trainer], update=True,
-                summaries=False, rewards=rewards, epoch=0,  # TODO fix annealing: no epochs
+                summaries=False, rewards=rewards, baseline=baseline, epoch=0,  # TODO fix annealing: no epochs
                 train=True
             )
             # summaries are False because they involve xent and target reference
@@ -964,7 +984,10 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
             if step % logging_period == logging_period - 1:
 
-                log("loss: {}".format(update_result[0].loss), color='red')
+                log("Loss: {}".format(update_result[0].loss), color='red')
+
+                if trainer.baseline:
+                    log("Baseline {}".format(baseline))
 
                 # write out gradients, updates and rewards
                 if store_gradients:

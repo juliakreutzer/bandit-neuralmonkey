@@ -171,6 +171,7 @@ class TensorFlowManager(object):
                         summaries=True,
                         batch_size=None,
                         rewards=None,
+                        baseline=None,
                         update=False,
                         store_gradients=False) -> List[BanditExecutionResult]:
         if batch_size is None:
@@ -196,7 +197,7 @@ class TensorFlowManager(object):
                         (feedables,
                          tensors_to_execute,
                          add_feed_dict) = executable.next_to_execute(
-                            reward=rewards, epoch=epoch)
+                            reward=rewards, baseline=baseline, epoch=epoch)
 
                         all_feedables = all_feedables.union(feedables)
 

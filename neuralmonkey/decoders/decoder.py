@@ -219,6 +219,9 @@ class Decoder(ModelPart):
 
             self.rewards = tf.placeholder(tf.float32, [None, self.sample_size],
                                           name="rewards")
+            self.baseline = tf.placeholder(tf.float32, [],
+                                          name="baseline")  # scalar
+
             self.epoch = tf.placeholder(tf.int32, [], name="epoch")
 
             # summaries
@@ -394,7 +397,10 @@ class Decoder(ModelPart):
             ix = tf.random_uniform((1,), 1, self.max_output_len+1, tf.int32)
             ixtemp = tf.one_hot(ix, self.max_output_len+1, on_value=-temperature,
                                 off_value=temperature)
-            temps = tf.unpack(ixtemp, axis=1)
+            #temps = tf.unpack(ixtemp, axis=1)
+            temps= tf.unpack(temperature*tf.ones_like(ixtemp), axis=1)
+
+            voc_size = len(self.vocabulary)
 
             for i, temp in zip(range(self.max_output_len+1), temps):
                 if i > 0:
@@ -431,19 +437,20 @@ class Decoder(ModelPart):
 
                         else:
                             # sampling
-                            prev_word_index = tf.cast(
+                            prev_word_index = tf.stop_gradient(tf.cast(
                                 tf.multinomial(out_activation/temp, 1),
-                                tf.int32)  # batch_size x sample_size
+                                tf.int32))  # batch_size x sample_size
                             prev_word_index = tf.squeeze(prev_word_index, [1])
 
                         # compute log probabilities from logits
-                        logprobs = tf.nn.log_softmax(out_activation/temp)
+                        # logprobs = tf.nn.log_softmax(out_activation/temp)  # can lead to numerical instabilities?
+                        z = tf.reduce_logsumexp(out_activation/temp, [1])  # batch_size vector
 
                         # use dynamic partition to get the logprobs of the samples
-                        voc_size = len(self.vocabulary)
                         partitions = tf.one_hot(prev_word_index, voc_size, dtype=tf.int32)
-                        sample_logprob_word = tf.dynamic_partition(logprobs, partitions=partitions, num_partitions=2)[1]
-                        logprob_predicted += sample_logprob_word
+                        sample_logprob_word = tf.dynamic_partition(out_activation/temp, partitions=partitions, num_partitions=2)[1]
+                        sample_logprob_word_normalized = sample_logprob_word - z
+                        logprob_predicted += sample_logprob_word_normalized
 
                         inp = self._embed_and_dropout(prev_word_index)
 
@@ -552,5 +559,5 @@ class Decoder(ModelPart):
         :return:
         """
         placeholders = [self.rewards, self.epoch, self.go_symbols, self.train_mode,
-                        self.train_inputs, self.train_padding]
+                        self.train_inputs, self.train_padding, self.baseline]
         return placeholders

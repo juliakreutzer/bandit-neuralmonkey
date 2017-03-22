@@ -36,7 +36,6 @@ def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
         )
     )
 
-
 def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
     """Get expected loss objective from decoder."""
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
@@ -61,6 +60,7 @@ def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
                                                 initial_temperature,
                                                 decoder.epoch)
                                             * (sample_logprobs + 1)
+                                            -decoder.baseline
                             )
             )
         )
@@ -203,7 +203,7 @@ def _get_samples(decoder, neg=False):
 class ExploitOnlyTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
-                 optimizer=None, binary_feedback=False, store_gradients=False) -> None:
+                 optimizer=None, binary_feedback=False, store_gradients=False, baseline=False) -> None:
         self.store_gradients = store_gradients
         initial_temperature = initial_temperature
         objective = exploit_only_objective(decoders[0],
@@ -212,13 +212,13 @@ class ExploitOnlyTrainer(GenericBanditTrainer):
             objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=False,
-            binary_feedback=binary_feedback, store_gradients=store_gradients)
+            binary_feedback=binary_feedback, store_gradients=store_gradients, baseline=baseline)
 
 
 class ExpectedLossTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
-                 optimizer=None, binary_feedback=False, store_gradients=False) -> None:
+                 optimizer=None, binary_feedback=False, store_gradients=False, baseline=False) -> None:
         initial_temperature = initial_temperature
         self.store_gradients = store_gradients
         objective = expected_loss_objective(decoders[0],
@@ -227,14 +227,14 @@ class ExpectedLossTrainer(GenericBanditTrainer):
             objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=False,
-            binary_feedback=binary_feedback, store_gradients=store_gradients)
+            binary_feedback=binary_feedback, store_gradients=store_gradients, baseline=baseline)
 
 
 class CrossEntropyTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
                  optimizer=None, binary_feedback=False,
-                 clip_prob=0.0, factor=1.0e10, store_gradients=False) -> None:
+                 clip_prob=0.0, factor=1.0e10, store_gradients=False, baseline=False) -> None:
         self.store_gradients = store_gradients
         objective = cross_entropy_objective(decoders[0],
                                             initial_temperature=initial_temperature,
@@ -244,26 +244,26 @@ class CrossEntropyTrainer(GenericBanditTrainer):
             objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=False,
-            binary_feedback=binary_feedback, store_gradients=store_gradients)
+            binary_feedback=binary_feedback, store_gradients=store_gradients, baseline=baseline)
 
 
 class PairwiseTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
-                 optimizer=None, binary_feedback=False, store_gradients=False) -> None:
+                 optimizer=None, binary_feedback=False, store_gradients=False, baseline=False) -> None:
         self.store_gradients = store_gradients
         objective = pairwise_objective(decoders[0],
                                        initial_temperature=initial_temperature)
         super(PairwiseTrainer, self).__init__(
             objective, evaluator, l1_weight, l2_weight, clip_norm=clip_norm,
-            optimizer=optimizer, pairwise=True, binary_feedback=binary_feedback, store_gradients=store_gradients)
+            optimizer=optimizer, pairwise=True, binary_feedback=binary_feedback, store_gradients=store_gradients, baseline=baseline)
 
 
 class PairwiseXentTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
                  optimizer=None, binary_feedback=False,
-                 clip_prob=0., factor=1.0e-10, store_gradients=False) -> None:
+                 clip_prob=0., factor=1.0e-10, store_gradients=False, baseline=False) -> None:
         self.store_gradients = store_gradients
         objective = pairwise_xent_objective(decoders[0],
                                             initial_temperature=initial_temperature,
@@ -272,4 +272,4 @@ class PairwiseXentTrainer(GenericBanditTrainer):
         super(PairwiseXentTrainer, self).__init__(
             objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
-            optimizer=optimizer, pairwise=True, binary_feedback=binary_feedback, store_gradients=store_gradients)
+            optimizer=optimizer, pairwise=True, binary_feedback=binary_feedback, store_gradients=store_gradients, baseline=baseline)

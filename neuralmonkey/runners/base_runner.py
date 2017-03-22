@@ -25,7 +25,7 @@ BanditExecutionResult = NamedTuple('BanditExecutionResult',
 
 class BanditExecutable(object):
 
-    def next_to_execute(self, rewards: List[float], epoch: int) -> NextExecute:
+    def next_to_execute(self, rewards: List[float], baseline: float, epoch: int) -> NextExecute:
         raise NotImplementedError()
 
     def collect_results(self, results: List[Dict]) -> None:
