@@ -398,7 +398,7 @@ class Decoder(ModelPart):
             ixtemp = tf.one_hot(ix, self.max_output_len+1, on_value=-temperature,
                                 off_value=temperature)
             #temps = tf.unpack(ixtemp, axis=1)
-            temps= tf.unpack(temperature*tf.ones_like(ixtemp), axis=1)
+            temps= tf.unpack(sample_mode*tf.ones_like(ixtemp), axis=1)
 
             voc_size = len(self.vocabulary)
 
@@ -442,13 +442,12 @@ class Decoder(ModelPart):
                                 tf.int32))  # batch_size x sample_size
                             prev_word_index = tf.squeeze(prev_word_index, [1])
 
-                        # compute log probabilities from logits
-                        # logprobs = tf.nn.log_softmax(out_activation/temp)  # can lead to numerical instabilities?
-                        z = tf.reduce_logsumexp(out_activation/temp, [1])  # batch_size vector
-
                         # use dynamic partition to get the logprobs of the samples
                         partitions = tf.one_hot(prev_word_index, voc_size, dtype=tf.int32)
                         sample_logprob_word = tf.dynamic_partition(out_activation/temp, partitions=partitions, num_partitions=2)[1]
+
+                        # compute log probabilities from logits
+                        z = tf.reduce_logsumexp(out_activation/temp, [1])  # batch_size vector
                         sample_logprob_word_normalized = sample_logprob_word - z
                         logprob_predicted += sample_logprob_word_normalized
 

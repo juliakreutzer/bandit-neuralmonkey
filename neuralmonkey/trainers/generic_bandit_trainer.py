@@ -157,7 +157,7 @@ class GenericBanditTrainer(object):
 
     def _get_gradients(self, tensor: tf.Tensor) -> Gradients:
         gradient_list = self.optimizer.compute_gradients(
-            tensor, tf.trainable_variables())
+            tensor, tf.trainable_variables(), aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N)
         return gradient_list
 
     # pylint: disable=unused-argument
