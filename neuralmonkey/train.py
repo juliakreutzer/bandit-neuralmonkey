@@ -167,12 +167,15 @@ def main() -> None:
     if cfg.model.runners_batch_size is None:
         cfg.model.runners_batch_size = cfg.model.batch_size
 
+    store_gradients = False
+
     if isinstance(cfg.model.trainer, GenericBanditTrainer):
         loop_function = bandit_training_loop
         log("Bandit Training.")
         if cfg.model.wmt:
             log("Online Learning for WMT")
             loop_function = bandit_training_loop_wmt
+            store_gradients = cfg.model.trainer.store_gradients
 
     else:
         loop_function = training_loop
@@ -198,5 +201,5 @@ def main() -> None:
                   copypostprocess=cfg.model.copypostprocess,
                   runners_batch_size=cfg.model.runners_batch_size,
                   minimize_metric=cfg.model.minimize,
-                  store_gradients=cfg.model.trainer.store_gradients,
+                  store_gradients=store_gradients,
                   batch_reward=cfg.model.batch_reward)
