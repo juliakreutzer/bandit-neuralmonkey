@@ -888,8 +888,9 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             seen_instances += 1
 
             # received sentence as source series
+            max_length = 50 # TODO make parameter
             batch_dataset = Dataset("wmt_input", {
-                "source": [wmt_sentence.split(" ")]}, {})
+                "source": [wmt_sentence.split(" ")[:max_length]]}, {})
 
             # sample an output for the requested sentence
             sampling_result = tf_manager.execute_bandits(
