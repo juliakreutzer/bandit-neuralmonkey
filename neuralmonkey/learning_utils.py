@@ -895,8 +895,8 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             sampling_result = tf_manager.execute_bandits(
                 batch_dataset, [trainer], epoch=0,  # TODO fix annealing: no epochs
                 update=False, summaries=True, rewards=None)
-            sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost = \
-                sampling_result[0].outputs[0]
+            sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost,\
+            neg_sample_index = sampling_result[0].outputs[0]
 
             # get greedy translation
             sentences_greedy = trainer.objective.decoder.vocabulary. \
