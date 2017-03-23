@@ -770,10 +770,11 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
     log("Starting training")
     reward_sum = 0   # running sum over rewards
     training = True
-    tf_manager.init_bandits([trainer])
 
     try:
         while training:
+
+            tf_manager.init_bandits([trainer])
 
             step += 1
             # request the next source sentence
