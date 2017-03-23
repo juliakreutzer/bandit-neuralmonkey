@@ -9,7 +9,12 @@ import tensorflow as tf
 
 def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
     """Get exploit only objective from decoder."""
-    decoded_logprobs = tf.expand_dims(tf.reduce_sum(tf.pack(decoder.decoded_logprobs), [0]), 1)
+    decoded_logprobs = tf.expand_dims(
+        tf.expand_dims(
+            tf.reduce_sum(
+                tf.pack(decoder.decoded_logprobs), [0]),
+            0),
+        1)
     decoded = tf.expand_dims(tf.pack(decoder.decoded), 2)
     decoder.neg_sample_ix = tf.constant(-1)  # not used but must be set for fetches
     return BanditObjective(
