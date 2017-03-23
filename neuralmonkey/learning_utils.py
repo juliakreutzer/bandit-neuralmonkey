@@ -729,11 +729,8 @@ log("Finished.")
 
 # pylint: disable=too-many-arguments, too-many-locals, too-many-branches
 def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
-                         epochs: int,
                          trainer: GenericBanditTrainer,
                          evaluators: EvalConfiguration,
-                         runners: List[BaseRunner],
-                         test_datasets: Optional[List[Dataset]]=None,
                          save_every_n: int=1000,
                          vars_prefix="/tmp/variables.data",
                          logging_period: int=20,
