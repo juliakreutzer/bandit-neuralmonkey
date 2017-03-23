@@ -589,13 +589,10 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 else:
                     baseline = 0.0
 
-                summaries_bool = step % logging_period == logging_period - 1
-
                 # update model with samples and their rewards
-                summaries_bool = False  # TODO change back
                 update_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=True,
-                    summaries=summaries_bool, rewards=rewards, baseline=baseline,
+                    summaries=False, rewards=rewards, baseline=baseline,
                     epoch=epoch_n-1,
                     train=True, store_gradients=store_gradients
                 )
@@ -773,13 +770,12 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
     log("Starting training")
     reward_sum = 0   # running sum over rewards
     training = True
+    tf_manager.init_bandits([trainer])
+
     try:
         while training:
 
             step += 1
-
-            tf_manager.init_bandits([trainer])
-
             # request the next source sentence
             wmt_sentence = None
             sentence_id = None
