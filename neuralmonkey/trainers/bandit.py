@@ -24,8 +24,8 @@ def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
                             decoded_logprobs *  # score function
                             tf.stop_gradient(  # don't differentiate this
                                             # loss from user feedback
-                                            -decoder.rewards +
-                                            # entropy regularizer T*(log p +1)
+                                            -(decoder.rewards - decoder.baseline)
+                                            + # entropy regularizer T*(log p +1)
                                             # T is annealed
                                             _get_temperature(
                                                 initial_temperature,
@@ -53,14 +53,14 @@ def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
                             sample_logprobs *  # score function
                             tf.stop_gradient(  # don't differentiate this
                                             # loss from user feedback
-                                            -decoder.rewards +
-                                            # entropy regularizer T*(log p +1)
+                                            -(decoder.rewards-decoder.baseline)
+                                            + # entropy regularizer T*(log p +1)
                                             # T is annealed
                                             _get_temperature(
                                                 initial_temperature,
                                                 decoder.epoch)
                                             * (sample_logprobs + 1)
-                                            -decoder.baseline
+
                             )
             )
         )
@@ -83,7 +83,7 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
             tf.reduce_mean(   # mean gradient of batch and samples
                 -sample_logprobs *  # score function
                 tf.stop_gradient(  # don't differentiate this
-                                (decoder.rewards -
+                                ( (decoder.rewards-decoder.baseline) -
                                  # entropy regularizer T*(log p +1)
                                  # T is annealed
                                  _get_temperature(
