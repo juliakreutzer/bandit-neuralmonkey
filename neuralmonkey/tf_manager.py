@@ -141,20 +141,20 @@ class TensorFlowManager(object):
 
         return collected_results
 
-    def init_bandits(self, execution_scripts):
+    def init_bandits(self, execution_scripts, summaries=False):
         # prepare partial run
         # need all feeds and all fetches
         all_feeds = []
-        [all_feeds.extend(s.get_executable(summaries=True,
+        [all_feeds.extend(s.get_executable(summaries=summaries,
                                         update=True).get_feeds())
                        for s in execution_scripts]
-        [all_feeds.extend(s.get_executable(summaries=True, update=False)
+        [all_feeds.extend(s.get_executable(summaries=summaries, update=False)
                           .get_feeds()) for s in execution_scripts]
         all_fetches = []
-        [all_fetches.extend(s.get_executable(summaries=True,
+        [all_fetches.extend(s.get_executable(summaries=summaries,
                                              update=True).get_fetches())
                      for s in execution_scripts]
-        [all_fetches.extend(s.get_executable(summaries=True,
+        [all_fetches.extend(s.get_executable(summaries=summaries,
                                              update=False).get_fetches()) for s
              in execution_scripts]
 

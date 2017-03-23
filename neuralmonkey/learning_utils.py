@@ -44,7 +44,10 @@ def training_loop(tf_manager: TensorFlowManager,
                   copypostprocess: Callable=None,
                   minimize_metric: bool=False,
                   store_gradients: bool=False,
-                  batch_reward: bool=False):
+                  batch_reward: bool=False,
+                  initial_seen_instances: int=0,
+                  initial_steps: int=0,
+                  initial_baseline: float=0.0):
 
     # TODO finish the list
     # TODO gradient storing not used here
@@ -83,8 +86,8 @@ def training_loop(tf_manager: TensorFlowManager,
                   for e in evaluators]
 
     main_metric = "{}/{}".format(evaluators[-1][0], evaluators[-1][-1].name)
-    step = 0
-    seen_instances = 0
+    step = initial_steps
+    seen_instances = initial_seen_instances
 
     save_n_best_vars = tf_manager.saver_max_to_keep
     if save_n_best_vars < 1:
@@ -268,7 +271,10 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                          copypostprocess: Callable=None,
                          minimize_metric: bool=False,
                          store_gradients: bool=False,
-                         batch_reward: bool=False):
+                         batch_reward: bool=False,
+                         initial_seen_instances: int = 0,
+                         initial_steps: int = 0,
+                         initial_baseline: float = 0.0):
 
     """
     Performs the training loop for given graph and data.
@@ -309,8 +315,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                   for e in evaluators]
 
     main_metric = "{}/{}".format(evaluators[-1][0], evaluators[-1][-1].name)
-    step = 0
-    seen_instances = 0
+    step = initial_steps
+    seen_instances = initial_seen_instances
 
     if save_n_best_vars < 1:
         raise Exception('save_n_best_vars must be greater than zero')
@@ -367,7 +373,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
         [os.makedirs(v, exist_ok=True) for v in valuelog_dirs]
 
     log("Starting training")
-    reward_sum = 0   # running sum over rewards
+    reward_sum = initial_seen_instances*initial_baseline   # running sum over rewards
     try:
         for epoch_n in range(1, epochs + 1):
             log_print("")
@@ -731,8 +737,10 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                          vars_prefix="/tmp/variables.data",
                          logging_period: int=20,
                          postprocess: Callable=None,
-                         copypostprocess: Callable=None
-                         ):
+                         copypostprocess: Callable=None,
+                         initial_seen_instances: int=0,
+                         initial_steps: int=0,
+                         initial_baseline: float=0.0):
 
     """
     Performs the training loop for given graph and WMT data.
@@ -754,8 +762,8 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
         vars_prefix: Prefix for variables to store.
         postprocess: post-processor.
     """
-    step = 0
-    seen_instances = 0
+    step = initial_steps
+    seen_instances = initial_seen_instances
 
     tf_manager.save(vars_prefix)
 
@@ -768,7 +776,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
     api_instance.reset_dataset()
 
     log("Starting training")
-    reward_sum = 0   # running sum over rewards
+    reward_sum = initial_baseline*initial_seen_instances  # running sum over rewards
     training = True
 
     try:

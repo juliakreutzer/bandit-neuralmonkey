@@ -45,6 +45,9 @@ def create_config() -> Configuration:
     config.add_argument('name', str)
     config.add_argument('random_seed', int, required=False)
     config.add_argument('initial_variables', str, required=False, default=[])
+    config.add_argument('initial_seen_instances', int, required=False, default=0)
+    config.add_argument('initial_steps', int, required=False, default=0)
+    config.add_argument('initial_baseline', float, required=False, default=0.0)
     config.add_argument('overwrite_output_dir', bool, required=False,
                         default=False)
     config.add_argument('batch_reward', bool, required=False, default=False)
@@ -180,7 +183,10 @@ def main() -> None:
                       logging_period=cfg.model.logging_period,
                       postprocess=cfg.model.postprocess,
                       copypostprocess=cfg.model.copypostprocess,
-                      save_every_n=cfg.model.save_every_n)
+                      save_every_n=cfg.model.save_every_n,
+                      initial_seen_instances=cfg.args.initial_seen_instances,
+                      initial_steps=cfg.args.initial_steps,
+                      initial_baseline=cfg.args.initial_baseline)
     else:
 
         if isinstance(cfg.model.trainer, GenericBanditTrainer):
@@ -217,4 +223,7 @@ def main() -> None:
                       runners_batch_size=cfg.model.runners_batch_size,
                       minimize_metric=cfg.model.minimize,
                       store_gradients=store_gradients,
-                      batch_reward=cfg.model.batch_reward)
+                      batch_reward=cfg.model.batch_reward,
+                      initial_seen_instances=cfg.args.initial_seen_instances,
+                      initial_steps=cfg.args.initial_steps,
+                      initial_baseline=cfg.args.initial_baseline)
