@@ -24,14 +24,16 @@ def create_config() -> Configuration:
 
     # training loop arguments
     config.add_argument('tf_manager', TensorFlowManager)
-    config.add_argument('epochs', int, cond=lambda x: x >= 0)
+    config.add_argument('epochs', int, cond=lambda x: x >= 0, required=False,
+                        default=20)
     config.add_argument('trainer')
-    config.add_argument('batch_size', int, cond=lambda x: x > 0)
-    config.add_argument('train_dataset', Dataset)
-    config.add_argument('val_dataset', Dataset)
+    config.add_argument('batch_size', int, cond=lambda x: x > 0, required=False,
+                        default=1)
+    config.add_argument('train_dataset', Dataset, required=False)
+    config.add_argument('val_dataset', Dataset, required=False)
     config.add_argument('output', str)
     config.add_argument('evaluation', list)
-    config.add_argument('runners', list)
+    config.add_argument('runners', list, required=False, default=[])
     config.add_argument('test_datasets', list, required=False, default=[])
     config.add_argument('logging_period', int, required=False, default=20)
     config.add_argument('validation_period', int, required=False, default=500)
@@ -47,6 +49,7 @@ def create_config() -> Configuration:
                         default=False)
     config.add_argument('batch_reward', bool, required=False, default=False)
     config.add_argument('wmt', bool, required=False, default=False)
+    config.add_argument('save_every_n', int, required=False, default=100)
 
     return config
 
@@ -169,37 +172,44 @@ def main() -> None:
 
     store_gradients = False
 
-    if isinstance(cfg.model.trainer, GenericBanditTrainer):
-        loop_function = bandit_training_loop
-        log("Bandit Training.")
-        if cfg.model.wmt:
+    if isinstance(cfg.model.trainer, GenericBanditTrainer) and cfg.model.wmt:
             log("Online Learning for WMT")
-            loop_function = bandit_training_loop_wmt
-            store_gradients = cfg.model.trainer.store_gradients
-
+            bandit_training_loop_wmt(tf_manager=cfg.model.tf_manager,
+                      trainer=cfg.model.trainer,
+                      evaluators=cfg.model.evaluation,
+                      vars_prefix=variables_file_prefix,
+                      logging_period=cfg.model.logging_period,
+                      postprocess=cfg.model.postprocess,
+                      copypostprocess=cfg.model.copypostprocess,
+                      save_every_n=cfg.model.save_every_n)
     else:
-        loop_function = training_loop
-        log("Full Information Training.")
 
+        if isinstance(cfg.model.trainer, GenericBanditTrainer):
+            loop_function = bandit_training_loop
+            log("Bandit Training.")
 
-    loop_function(tf_manager=cfg.model.tf_manager,
-                  epochs=cfg.model.epochs,
-                  trainer=cfg.model.trainer,
-                  batch_size=cfg.model.batch_size,
-                  train_dataset=cfg.model.train_dataset,
-                  val_dataset=cfg.model.val_dataset,
-                  log_directory=cfg.model.output,
-                  valuelog_dirs=[gradients_file, updates_file, rewards_file],
-                  evaluators=cfg.model.evaluation,
-                  runners=cfg.model.runners,
-                  test_datasets=cfg.model.test_datasets,
-                  link_best_vars=link_best_vars,
-                  vars_prefix=variables_file_prefix,
-                  logging_period=cfg.model.logging_period,
-                  validation_period=cfg.model.validation_period,
-                  postprocess=cfg.model.postprocess,
-                  copypostprocess=cfg.model.copypostprocess,
-                  runners_batch_size=cfg.model.runners_batch_size,
-                  minimize_metric=cfg.model.minimize,
-                  store_gradients=store_gradients,
-                  batch_reward=cfg.model.batch_reward)
+        else:
+            loop_function = training_loop
+            log("Full Information Training.")
+
+        loop_function(tf_manager=cfg.model.tf_manager,
+                      epochs=cfg.model.epochs,
+                      trainer=cfg.model.trainer,
+                      batch_size=cfg.model.batch_size,
+                      train_dataset=cfg.model.train_dataset,
+                      val_dataset=cfg.model.val_dataset,
+                      log_directory=cfg.model.output,
+                      valuelog_dirs=[gradients_file, updates_file, rewards_file],
+                      evaluators=cfg.model.evaluation,
+                      runners=cfg.model.runners,
+                      test_datasets=cfg.model.test_datasets,
+                      link_best_vars=link_best_vars,
+                      vars_prefix=variables_file_prefix,
+                      logging_period=cfg.model.logging_period,
+                      validation_period=cfg.model.validation_period,
+                      postprocess=cfg.model.postprocess,
+                      copypostprocess=cfg.model.copypostprocess,
+                      runners_batch_size=cfg.model.runners_batch_size,
+                      minimize_metric=cfg.model.minimize,
+                      store_gradients=store_gradients,
+                      batch_reward=cfg.model.batch_reward)
