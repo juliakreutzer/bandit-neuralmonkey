@@ -176,7 +176,6 @@ def main() -> None:
             log("Online Learning for WMT")
             bandit_training_loop_wmt(tf_manager=cfg.model.tf_manager,
                       trainer=cfg.model.trainer,
-                      evaluators=cfg.model.evaluation,
                       vars_prefix=variables_file_prefix,
                       logging_period=cfg.model.logging_period,
                       postprocess=cfg.model.postprocess,
