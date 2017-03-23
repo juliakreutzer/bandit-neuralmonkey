@@ -888,14 +888,14 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             seen_instances += 1
 
             # received sentence as source series
-            max_length = 50 # TODO make parameter
+            max_length = 50  # TODO make parameter
             batch_dataset = Dataset("wmt_input", {
                 "source": [wmt_sentence.split(" ")[:max_length]]}, {})
 
             # sample an output for the requested sentence
             sampling_result = tf_manager.execute_bandits(
                 batch_dataset, [trainer], epoch=0,  # TODO fix annealing: no epochs
-                update=False, summaries=True, rewards=None)
+                update=False, summaries=False, rewards=None)
             sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost,\
             neg_sample_index = sampling_result[0].outputs[0]
 
@@ -955,8 +955,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
                         sample_rewards.append(r)
 
-                        if len(sample_rewards) <= 5\
-                                and step % logging_period == logging_period - 1:
+                        if step % logging_period == logging_period - 1:
                             log_print("WMT incoming sentence {}: {}".format(
                                 seen_instances, wmt_sentence))
                             log_print("Translation sent back {}: {}".format(
@@ -998,6 +997,9 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                             stochastic_update)
                     np.save("{}/{}".format(valuelog_dirs[2], seen_instances),
                             rewards)
+
+            if step % 1000 == 0:
+                tf_manager.save("{}.{}".format(vars_prefix, seen_instances))
 
             if step % validation_period == validation_period - 1:
                 val_results, val_outputs = run_on_dataset(
