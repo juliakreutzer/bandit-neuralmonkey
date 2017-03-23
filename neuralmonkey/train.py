@@ -96,14 +96,16 @@ def main() -> None:
                 .format(cfg.model.output), color='red')
             exit(1)
 
-    try:
-        check_dataset_and_coders(cfg.model.train_dataset,
-                                 cfg.model.runners)
-        check_dataset_and_coders(cfg.model.val_dataset,
-                                 cfg.model.runners)
-    except CheckingException as exc:
-        log(str(exc), color='red')
-        exit(1)
+    if not cfg.model.wmt:
+        # don't check for datasets for wmt training
+        try:
+            check_dataset_and_coders(cfg.model.train_dataset,
+                                     cfg.model.runners)
+            check_dataset_and_coders(cfg.model.val_dataset,
+                                     cfg.model.runners)
+        except CheckingException as exc:
+            log(str(exc), color='red')
+            exit(1)
 
     # pylint: disable=broad-except
     if not os.path.isdir(cfg.model.output):
@@ -170,8 +172,6 @@ def main() -> None:
     if cfg.model.runners_batch_size is None:
         cfg.model.runners_batch_size = cfg.model.batch_size
 
-    store_gradients = False
-
     if isinstance(cfg.model.trainer, GenericBanditTrainer) and cfg.model.wmt:
             log("Online Learning for WMT")
             bandit_training_loop_wmt(tf_manager=cfg.model.tf_manager,
@@ -191,6 +191,12 @@ def main() -> None:
         else:
             loop_function = training_loop
             log("Full Information Training.")
+
+        try:
+            # only used for bandit learning
+            store_gradients = cfg.model.trainer.store_gradients
+        except:
+            store_gradients = False
 
         loop_function(tf_manager=cfg.model.tf_manager,
                       epochs=cfg.model.epochs,
