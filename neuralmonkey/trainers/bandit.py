@@ -106,10 +106,12 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
 
 def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
-    sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
-    sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
+    #sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
+    #sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
     #sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
     #    _get_sample_pairs(decoder)
+    sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
+        _get_sample_pairs_from_runtime_logits(decoder)
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
     decoder.neg_sample_ix = neg_ix
 
@@ -143,8 +145,10 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
     """Get bandit cross-entropy loss objective from decoder."""
     #sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
     #    _get_sample_pairs_from_runtime_logits(decoder)
-    sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
-    sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
+    #sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
+    #sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
+    sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
+        _get_sample_pairs_from_runtime_logits(decoder)
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
     decoder.neg_sample_ix = neg_ix
 
