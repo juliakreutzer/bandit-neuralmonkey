@@ -332,7 +332,7 @@ class Decoder(ModelPart):
         else:
             return self._runtime_attention_objects.get(encoder)
 
-    def _sample_from_rnn_states(self, neg=False):
+    def _sample_from_runtime_logits(self, neg=False):
         """Sample from the runtime hidden states"""
         sample_size = 1  # for now
         voc_size = len(self.vocabulary)
@@ -461,8 +461,8 @@ class Decoder(ModelPart):
             ix = tf.random_uniform((1,), 1, self.max_output_len+1, tf.int32)
             ixtemp = tf.one_hot(ix, self.max_output_len+1, on_value=-temperature,
                                 off_value=temperature)
-            #temps = tf.unpack(ixtemp, axis=1)
-            temps = tf.unpack(sample_mode*tf.ones_like(ixtemp), axis=1)
+            temps = tf.unpack(ixtemp, axis=1)
+            #temps = tf.unpack(sample_mode*tf.ones_like(ixtemp), axis=1)
 
             voc_size = len(self.vocabulary)
 
