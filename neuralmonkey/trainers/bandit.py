@@ -106,10 +106,12 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
 
 def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
-    sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
-    sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
-    decoder.neg_sample_ix = neg_ix
+    #sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
+    #sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
+    sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
+        _get_sample_pairs(decoder)
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
+    decoder.neg_sample_ix = neg_ix
 
     return BanditObjective(
         name="{} - pairwise".format(decoder.name),
@@ -139,8 +141,9 @@ def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
 def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
         -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
-    sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
-    sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
+    sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
+        _get_sample_pairs( decoder)
+    pair_logprobs = (sample_logprobs + sample_logprobs_2)
     decoder.neg_sample_ix = neg_ix
 
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
@@ -203,6 +206,18 @@ def _get_samples(decoder, neg=False):
     sample_ids = tf.expand_dims(tf.pack(sample_ids), 2)  # time x batch x sample_size
     sample_logprobs = tf.expand_dims(sample_logprob, 1) # batch x sample_size
     return sample_ids, sample_logprobs, neg_ix
+
+def _get_sample_pairs(decoder):
+    """Sample from runtime logits"""
+    sample_ids, sample_logprob, _ = decoder._sample_from_rnn_states(neg=False)
+    sample_ids2, sample_logprob2, neg_ix = decoder._sample_from_rnn_states(neg=True)
+    sample_ids = tf.expand_dims(tf.pack(sample_ids),
+                                2)  # time x batch x sample_size
+    sample_logprobs = tf.expand_dims(sample_logprob, 1)  # batch x sample_size
+    sample_ids2 = tf.expand_dims(tf.pack(sample_ids2),
+                                2)  # time x batch x sample_size
+    sample_logprobs2 = tf.expand_dims(sample_logprob2, 1)  # batch x sample_size
+    return sample_ids, sample_ids2, sample_logprobs, sample_logprobs2, neg_ix
 
 
 class ExploitOnlyTrainer(GenericBanditTrainer):

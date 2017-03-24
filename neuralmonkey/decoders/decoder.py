@@ -332,6 +332,70 @@ class Decoder(ModelPart):
         else:
             return self._runtime_attention_objects.get(encoder)
 
+    def _sample_from_rnn_states(self, neg=False):
+        """Sample from the runtime hidden states"""
+        sample_size = 1  # for now
+        voc_size = len(self.vocabulary)
+
+        sample_ids = []
+        sample_logprob = 0.0
+
+        model_logprob = self.runtime_logits
+
+        # sampling from negative weights of last layer
+        ix = tf.constant(-1)
+        if neg:
+            # version 1: negating all logits
+            # temps = [-1 for l in self.runtime_logits]
+
+            # version 2: negating all logits randomly
+            # temps = [tf.sign(tf.random_uniform((1,), -1, 1))
+            #         for l in self.runtime_logits]
+
+            # version 3: negating logits only for first word
+            # temps = [1 for l in self.runtime_logits]
+            # temps[0] = -1
+
+            # version 4: negating logits only for one word, chosen randomly
+            ix = tf.random_uniform((1,), 0, len(self.runtime_logits),
+                                   tf.int32)
+            ixtemp = tf.one_hot(ix, len(self.runtime_logits), on_value=-1.,
+                                off_value=1.)
+            temps = tf.unpack(ixtemp, axis=1)
+
+            # version 5: sample (positive) temperature for every word
+            # temps = tf.unpack(tf.random_uniform((len(self.runtime_logits),),
+            #                                   0.01, 1.01, tf.float32))
+
+            model_logprob = [l / t for l, t in
+                             zip(self.runtime_logits, temps)]
+
+            # version 6: all the same as first sample
+            # model_logprob = self.runtime_logits
+
+            # TODO version 7: sample once with high temp (1,-> like sample, explore), one with low (0.01, -> like greedy, exploit)
+            # else:
+            #    temps = [0.01 for l in self.runtime_logits]
+            #    model_logprob = model_logprob = [l/n for l,n in zip(self.runtime_logits, temps)]
+
+        for p in model_logprob:  # time steps
+
+            # with gather and flattening
+            sample_id = tf.stop_gradient(tf.cast(tf.multinomial(p, sample_size),
+                                tf.int32))  # batch_size x 1
+            sample_id = tf.squeeze(sample_id, [1])  # batch_size
+
+            # use dynamic partition to get the logprobs of the samples
+            partitions = tf.one_hot(sample_id, voc_size, dtype=tf.int32)
+            sample_logprob_word = \
+            tf.dynamic_partition(p, partitions=partitions,
+                                 num_partitions=2)[1]
+
+            sample_ids.append(sample_id)
+            sample_logprob += sample_logprob_word
+
+        return tf.pack(sample_ids), sample_logprob, ix
+
     # pylint: disable=too-many-branches
     def _attention_decoder(
             self,
