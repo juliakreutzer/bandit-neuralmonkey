@@ -142,7 +142,7 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
         -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
-        _get_sample_pairs( decoder)
+        _get_sample_pairs_from_runtime_logits(decoder)
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
     decoder.neg_sample_ix = neg_ix
 
@@ -208,9 +208,20 @@ def _get_samples(decoder, neg=False):
     return sample_ids, sample_logprobs, neg_ix
 
 def _get_sample_pairs(decoder):
+    sample_ids, sample_logprobs, neg_ix = _get_samples(decoder, neg=False)
+    greedy_logprobs = tf.expand_dims(
+        tf.expand_dims(
+            tf.reduce_sum(
+                tf.pack(decoder.decoded_logprobs), [0]),
+            0),
+        1)
+    greedy_ids = tf.expand_dims(tf.pack(decoder.decoded), 2)
+    return greedy_ids, sample_ids, greedy_logprobs, sample_logprobs, neg_ix
+
+def _get_sample_pairs_from_runtime_logits(decoder):
     """Sample from runtime logits"""
-    sample_ids, sample_logprob, _ = decoder._sample_from_rnn_states(neg=False)
-    sample_ids2, sample_logprob2, neg_ix = decoder._sample_from_rnn_states(neg=True)
+    sample_ids, sample_logprob, _ = decoder._sample_from_runtime_logits(neg=False)
+    sample_ids2, sample_logprob2, neg_ix = decoder._sample_from_runtime_logits(neg=True)
     sample_ids = tf.expand_dims(tf.pack(sample_ids),
                                 2)  # time x batch x sample_size
     sample_logprobs = tf.expand_dims(sample_logprob, 1)  # batch x sample_size
