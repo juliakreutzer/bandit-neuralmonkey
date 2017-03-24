@@ -36,6 +36,9 @@ CONFIG.ignore_argument('overwrite_output_dir')
 CONFIG.ignore_argument('store_gradients')
 CONFIG.ignore_argument('batch_reward')
 CONFIG.ignore_argument('wmt')
+CONFIG.ignore_argument('initial_baseline')
+CONFIG.ignore_argument('initial_seen_instances')
+CONFIG.ignore_argument('initial_steps')
 
 
 def default_variable_file(output_dir):
