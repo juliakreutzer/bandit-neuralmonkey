@@ -158,9 +158,9 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
     return BanditObjective(
         name="{} - pairwise_xent".format(decoder.name),
         decoder=decoder,
-        samples=[decoder.sample_ids, decoder.sample_ids_2],
-        sample_logprobs=[decoder.sample_logprobs,
-                         decoder.sample_logprobs_2],
+        samples=[sample_ids, sample_ids_2],
+        sample_logprobs=[sample_logprobs,
+                         sample_logprobs_2],
         loss=-tf.reduce_mean(tf.mul(pair_logprobs,
                                     decoder.rewards), [0, 1]),
         gradients=lambda grad_fun: grad_fun(
