@@ -94,6 +94,22 @@ class Decoder(ModelPart):
         self._rnn_cell = rnn_cell
         self.temperature = temperature
 
+        # TODO init
+        def _init_grad():
+            gradient = []
+            for var in tf.trainable_variables():
+                print(var.name)
+                gradient.append((tf.zeros_like(var, dtype=tf.float32), var))
+            return gradient
+
+        self.score_fun_variance = _init_grad()  # variance of score function
+        self.score_fun_mean = _init_grad()
+        self.dist_mean = _init_grad()
+        self.codist_mean = _init_grad()
+        self.rewarded_score_fun_mean = _init_grad()
+        self.covariance = _init_grad() # covariance of score function and gradient
+
+
         if self.embedding_size is None and self.embeddings_encoder is None:
             raise ValueError("You must specify either embedding size or the "
                              "encoder from which to reuse the embeddings ("
@@ -223,6 +239,7 @@ class Decoder(ModelPart):
                                           name="baseline")  # scalar
 
             self.epoch = tf.placeholder(tf.int32, [], name="epoch")
+            self.iteration = tf.placeholder(tf.int32, [], name="iteration")
 
             # summaries
             tf.scalar_summary('train_loss_with_gt_intpus',
@@ -623,5 +640,6 @@ class Decoder(ModelPart):
         :return:
         """
         placeholders = [self.rewards, self.epoch, self.go_symbols, self.train_mode,
-                        self.train_inputs, self.train_padding, self.baseline]
+                        self.train_inputs, self.train_padding, self.baseline,
+                        self.iteration]
         return placeholders

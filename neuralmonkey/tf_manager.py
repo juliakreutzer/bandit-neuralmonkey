@@ -167,6 +167,7 @@ class TensorFlowManager(object):
                         dataset: Dataset,
                         execution_scripts,
                         epoch,
+                        iteration,
                         train=False,
                         summaries=True,
                         batch_size=None,
@@ -197,7 +198,8 @@ class TensorFlowManager(object):
                         (feedables,
                          tensors_to_execute,
                          add_feed_dict) = executable.next_to_execute(
-                            reward=rewards, baseline=baseline, epoch=epoch)
+                            reward=rewards, baseline=baseline, epoch=epoch,
+                            iteration=iteration)
 
                         all_feedables = all_feedables.union(feedables)
 

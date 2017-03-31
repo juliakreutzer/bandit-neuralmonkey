@@ -1,6 +1,7 @@
 from typing import Any, List
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer, \
-    BanditObjective, _clip_probs
+    BanditObjective, _clip_probs, _sum_gradients, _scale_gradients, \
+    _subtract_gradients, _divide_gradients, _multiply_gradients, _add_to_gradients
 
 import tensorflow as tf
 
@@ -41,10 +42,20 @@ def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
         )
     )
 
-def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
+def expected_loss_objective(decoder, optimizer, initial_temperature) -> BanditObjective:
     """Get expected loss objective from decoder."""
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
     decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
+
+    # compute gradients
+    # - (reward-baseline)* gradient(logprobs)
+    scalars = tf.stop_gradient(
+                    -(decoder.rewards-decoder.baseline) + \
+                    _get_temperature(initial_temperature,decoder.epoch)*(sample_logprobs + 1)
+              )  # batch_size x 1
+    scaled_gradients = optimizer.compute_gradients(tf.reduce_mean(sample_logprobs*scalars))
+
+
     return BanditObjective(
         name="{} - expected_loss".format(decoder.name),
         decoder=decoder,
@@ -52,23 +63,80 @@ def expected_loss_objective(decoder, initial_temperature) -> BanditObjective:
         sample_logprobs=sample_logprobs,
         loss=tf.reduce_mean(tf.mul(tf.exp(sample_logprobs), -decoder.rewards),
                              [0, 1]),
-        # TODO include entropy in loss
-        gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(  # mean gradient of batch and samples
-                            sample_logprobs *  # score function
-                            tf.stop_gradient(  # don't differentiate this
-                                            # loss from user feedback
-                                            -(decoder.rewards-decoder.baseline)
-                                            + # entropy regularizer T*(log p +1)
-                                            # T is annealed
-                                            _get_temperature(
-                                                initial_temperature,
-                                                decoder.epoch)
-                                            * (sample_logprobs + 1)
+        gradients= scaled_gradients
+        #lambda grad_fun: grad_fun(
+        #    tf.reduce_mean(  # mean gradient of batch and samples
+        #                    sample_logprobs *  # score function
+        #                    tf.stop_gradient(  # don't differentiate this
+        #                                    # loss from user feedback
+        #                                    -(decoder.rewards-decoder.baseline)
+        #                                    + # entropy regularizer T*(log p +1)
+        #                                    # T is annealed
+        #                                    _get_temperature(
+        #                                        initial_temperature,
+        #                                        decoder.epoch)
+        #                                    * (sample_logprobs + 1)
 
-                            )
-            )
-        )
+        #                    )
+        #    )
+        #)
+    )
+
+
+
+def expected_loss_objective_with_scorefun(decoder, optimizer) -> BanditObjective:
+    """Get expected loss objective from decoder."""
+    sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
+    decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
+
+    # update online covariance and variance estimates
+    # h = score function
+    score_fun = optimizer.compute_gradients(tf.reduce_mean(sample_logprobs), tf.trainable_variables())  # aggregated over batch
+
+    #score_fun = tf.gradients(sample_logprobs, tf.trainable_variables())
+    # f = score function * reward
+    rewarded_score_fun = optimizer.compute_gradients(tf.reduce_mean(sample_logprobs*-decoder.rewards), tf.trainable_variables()) # aggregated over batch
+
+    # compute variance
+
+    #(x_n - x_mean_n-1)
+    cur_distance_from_mean = _subtract_gradients(score_fun, decoder.score_fun_mean)
+    # (x_n - x_mean_n-1)/n
+    cur_distance_from_mean_norm = _scale_gradients(cur_distance_from_mean, tf.cast(decoder.iteration, tf.float32))
+    # update mean of score function
+    # x_mean_n = x_mean_n-1 + (x_n - x_mean_n-1)/n
+    decoder.score_fun_mean = _sum_gradients([decoder.score_fun_mean, cur_distance_from_mean_norm])
+    # (x_n - x_mean_n)
+    cur_distance_from_new_mean = _subtract_gradients(score_fun, decoder.score_fun_mean)
+    # (x_n - x_mean_n_1)* (x_n - x_mean_n)
+    cur_distance_from_mean_sq = _multiply_gradients([cur_distance_from_mean, cur_distance_from_new_mean])
+    # update mean of distances from means
+    # M_2,n = M_2,n-1 + (x_n - x_mean_n-1)*(x_n - x_mean_n)
+    decoder.dist_mean = _sum_gradients([decoder.dist_mean, cur_distance_from_mean_sq])
+    decoder.score_fun_variance = _scale_gradients(decoder.dist_mean, 1./(tf.cast(decoder.iteration, tf.float32)-1))
+
+    # compute covariance
+    # (y_n - y_mean_n-1)
+    cur_distance_from_mean_2 = _subtract_gradients(rewarded_score_fun, decoder.rewarded_score_fun_mean)
+    means_product = _multiply_gradients([cur_distance_from_mean_2, cur_distance_from_new_mean])
+    decoder.codist_mean = _sum_gradients([decoder.codist_mean, means_product])
+    decoder.covariance = _scale_gradients(decoder.codist_mean, 1./(tf.cast(decoder.iteration, tf.float32)))
+
+    # scaling a = cov(f,h)/var(h)
+    scaling = _divide_gradients(decoder.covariance, decoder.score_fun_variance)  # for each component of the gradient
+
+    # scale score function
+    scaled_score_fun = _multiply_gradients([score_fun, scaling])
+    full_grad = _sum_gradients([rewarded_score_fun, scaled_score_fun])  # score_fun*-reward + score_fun*a
+
+    return BanditObjective(
+        name="{} - expected_loss".format(decoder.name),
+        decoder=decoder,
+        samples=sample_ids,
+        sample_logprobs=sample_logprobs,
+        loss=tf.reduce_mean(tf.mul(tf.exp(sample_logprobs), -decoder.rewards),
+                             [0, 1]),
+        gradients=full_grad
     )
 
 
@@ -77,6 +145,7 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
     """Get bandit cross-entropy loss objective from decoder."""
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
     decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
+
     return BanditObjective(
         name="{} - cross-entropy".format(decoder.name),
         decoder=decoder,
@@ -240,7 +309,7 @@ def _get_sample_pairs_from_runtime_logits(decoder):
 class ExploitOnlyTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
-                 optimizer=None, binary_feedback=False, store_gradients=False, baseline=False) -> None:
+                 optimizer=None, binary_feedback=False, store_gradients=False, baseline=False, score_function=False) -> None:
         self.store_gradients = store_gradients
         initial_temperature = initial_temperature
         objective = exploit_only_objective(decoders[0],
@@ -255,11 +324,14 @@ class ExploitOnlyTrainer(GenericBanditTrainer):
 class ExpectedLossTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
-                 optimizer=None, binary_feedback=False, store_gradients=False, baseline=False) -> None:
+                 optimizer=None, binary_feedback=False, store_gradients=False, baseline=False, score_function=False) -> None:
         initial_temperature = initial_temperature
         self.store_gradients = store_gradients
-        objective = expected_loss_objective(decoders[0],
-                                            initial_temperature=initial_temperature)
+        # TODO combine both
+        if score_function:
+            objective = expected_loss_objective_with_scorefun(decoders[0], optimizer)
+        else:
+            objective = expected_loss_objective(decoders[0], optimizer, initial_temperature)
         super(ExpectedLossTrainer, self).__init__(
             objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,

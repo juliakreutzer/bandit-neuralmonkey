@@ -73,7 +73,7 @@ class GenericBanditTrainer(object):
             self.loss = self.objective.loss + self.regularizer_cost
 
             # compute and apply gradients
-            self.gradients = self.objective.gradients(self._get_gradients)
+            self.gradients = self.objective.gradients
             self.reg_gradients = self._get_gradients(self.regularizer_cost)
             self.all_gradients = \
                 _sum_gradients([self.gradients, self.reg_gradients])
@@ -166,8 +166,9 @@ class GenericBanditTrainer(object):
         outputs = [self.concatenated_gradients, self.concatenated_updates] if store_gradients else []
         if update:
             return UpdateBanditExecutable(self.all_coders,
-                                          [self.objective.decoder.rewards, self.objective.decoder.baseline],
-                                          self.objective.decoder.epoch,
+                                          [self.objective.decoder.rewards,
+                                           self.objective.decoder.baseline],
+                                          [self.objective.decoder.epoch, self.objective.decoder.iteration],
                                           self.dummy, self.loss,
                                           outputs,
                                           self.scalar_summaries
@@ -183,6 +184,11 @@ class GenericBanditTrainer(object):
                                           None,  # no summaries yet
                                           None)
 
+def _add_to_gradients(gradients: Gradients, scalar: tf.float32) -> Gradients:
+    sum_dict = {}
+    for tensor, var in gradients:
+        sum_dict[var] = tensor+scalar
+    return [(tensor, var) for var, tensor in sum_dict.items()]
 
 def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:
     summed_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
@@ -194,6 +200,41 @@ def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:
                 else:
                     summed_dict[var] += tensor
     return [(tensor, var) for var, tensor in summed_dict.items()]
+
+def _multiply_gradients(gradients_list: List[Gradients]) -> Gradients:
+    product_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
+    for gradients in gradients_list:
+        for tensor, var in gradients:
+            if tensor is not None:
+                if not var in product_dict:
+                    product_dict[var] = tensor
+                else:
+                    product_dict[var] *= tensor
+    return [(tensor, var) for var, tensor in product_dict.items()]
+
+def _subtract_gradients(x: Gradients, y: Gradients) -> Gradients:
+    subtract_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
+    for tensor, var in x:
+        subtract_dict[var] = tensor
+    for tensor, var in y:
+        subtract_dict[var] -= tensor
+    return [(tensor, var) for var, tensor in subtract_dict.items()]
+
+def _scale_gradients(gradients: [Gradients], scalar) -> Gradients:
+    scaled_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
+    for tensor, var in gradients:
+        if tensor is not None:
+            scaled_dict[var] = tensor*scalar
+    return [(tensor, var) for var, tensor in scaled_dict.items()]
+
+def _divide_gradients(x: Gradients, y: Gradients) -> Gradients:
+    """ Divide the components of x by the components of y """
+    divide_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
+    for tensor, var in x:
+        divide_dict[var] = tensor
+    for tensor, var in y:
+        divide_dict[var] -= tensor
+    return [(tensor, var) for var, tensor in divide_dict.items()]
 
 
 def _clip_probs(probs, prob_threshold):
@@ -212,7 +253,7 @@ class UpdateBanditExecutable(BanditExecutable):
                  update_op, loss, gradient, scalar_summaries, histogram_summaries, store_gradients):
         self.all_coders = all_coders
         self.reward_placeholder, self.baseline_placeholder = reward_placeholder
-        self.epoch_placeholder = epoch_placeholder
+        self.epoch_placeholder, self.iteration_placeholder = epoch_placeholder
         self.update_op = update_op
         self.loss = loss
         self.scalar_summaries = scalar_summaries
@@ -222,7 +263,7 @@ class UpdateBanditExecutable(BanditExecutable):
 
         self.result = None
 
-    def next_to_execute(self, reward: List[float], baseline: float, epoch: int) -> NextExecute:
+    def next_to_execute(self, reward: List[float], baseline: float, epoch: int, iteration: int) -> NextExecute:
         fetches = {'update_op': self.update_op}
         if self.scalar_summaries is not None:
             fetches['scalar_summaries'] = self.scalar_summaries
@@ -234,6 +275,7 @@ class UpdateBanditExecutable(BanditExecutable):
         # extra feed for reward
         return feedables, fetches, {self.reward_placeholder: reward,
                                     self.epoch_placeholder: epoch,
+                                    self.iteration_placeholder: iteration,
                                     self.baseline_placeholder: baseline}
 
     def collect_results(self, results: List[Dict]) -> None:
@@ -279,7 +321,7 @@ class SampleBanditExecutable(BanditExecutable):
         self.regularization_cost = regularization_cost
         self.result = None
 
-    def next_to_execute(self, reward=None, baseline=None, epoch=None) -> NextExecute:
+    def next_to_execute(self, reward=None, baseline=None, epoch=None, iteration=None) -> NextExecute:
         fetches = {'sample_op': self.sample_op}
         fetches["greedy_op"] = self.greedy_op
         if self.scalar_summaries is not None:
