@@ -771,10 +771,6 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
     wmt_client_python.configuration.host = tf_manager.get_host()
     api_instance = wmt_client_python.SharedTaskApi()
 
-    # TODO only for mock service
-    # REMOVE for training!
-    api_instance.reset_dataset()
-
     log("Starting training")
     reward_sum = initial_baseline*initial_seen_instances  # running sum over rewards
     training = True
