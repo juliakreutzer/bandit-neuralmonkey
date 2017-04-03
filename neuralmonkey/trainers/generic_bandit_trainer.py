@@ -168,7 +168,7 @@ class GenericBanditTrainer(object):
             return UpdateBanditExecutable(self.all_coders,
                                           [self.objective.decoder.rewards,
                                            self.objective.decoder.baseline],
-                                          [self.objective.decoder.epoch, self.objective.decoder.iteration],
+                                          [self.objective.decoder.epoch, self.objective.decoder.step],
                                           self.dummy, self.loss,
                                           outputs,
                                           self.scalar_summaries
@@ -253,7 +253,7 @@ class UpdateBanditExecutable(BanditExecutable):
                  update_op, loss, gradient, scalar_summaries, histogram_summaries, store_gradients):
         self.all_coders = all_coders
         self.reward_placeholder, self.baseline_placeholder = reward_placeholder
-        self.epoch_placeholder, self.iteration_placeholder = epoch_placeholder
+        self.epoch_placeholder, self.step_placeholder = epoch_placeholder
         self.update_op = update_op
         self.loss = loss
         self.scalar_summaries = scalar_summaries
@@ -263,7 +263,7 @@ class UpdateBanditExecutable(BanditExecutable):
 
         self.result = None
 
-    def next_to_execute(self, reward: List[float], baseline: float, epoch: int, iteration: int) -> NextExecute:
+    def next_to_execute(self, reward: List[float], baseline: float, epoch: int, step: int) -> NextExecute:
         fetches = {'update_op': self.update_op}
         if self.scalar_summaries is not None:
             fetches['scalar_summaries'] = self.scalar_summaries
@@ -275,7 +275,7 @@ class UpdateBanditExecutable(BanditExecutable):
         # extra feed for reward
         return feedables, fetches, {self.reward_placeholder: reward,
                                     self.epoch_placeholder: epoch,
-                                    self.iteration_placeholder: iteration,
+                                    self.step_placeholder: step,
                                     self.baseline_placeholder: baseline}
 
     def collect_results(self, results: List[Dict]) -> None:
@@ -321,7 +321,7 @@ class SampleBanditExecutable(BanditExecutable):
         self.regularization_cost = regularization_cost
         self.result = None
 
-    def next_to_execute(self, reward=None, baseline=None, epoch=None, iteration=None) -> NextExecute:
+    def next_to_execute(self, reward=None, baseline=None, epoch=None, step=None) -> NextExecute:
         fetches = {'sample_op': self.sample_op}
         fetches["greedy_op"] = self.greedy_op
         if self.scalar_summaries is not None:

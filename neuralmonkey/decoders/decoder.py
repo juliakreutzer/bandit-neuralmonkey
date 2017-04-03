@@ -239,7 +239,7 @@ class Decoder(ModelPart):
                                           name="baseline")  # scalar
 
             self.epoch = tf.placeholder(tf.int32, [], name="epoch")
-            self.iteration = tf.placeholder(tf.int32, [], name="iteration")
+            self.step = tf.placeholder(tf.int32, [], name="step")
 
             # summaries
             tf.scalar_summary('train_loss_with_gt_intpus',
@@ -641,5 +641,5 @@ class Decoder(ModelPart):
         """
         placeholders = [self.rewards, self.epoch, self.go_symbols, self.train_mode,
                         self.train_inputs, self.train_padding, self.baseline,
-                        self.iteration]
+                        self.step]
         return placeholders

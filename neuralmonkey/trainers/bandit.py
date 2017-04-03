@@ -90,6 +90,8 @@ def expected_loss_objective_with_scorefun(decoder, optimizer) -> BanditObjective
     decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
 
     # update online covariance and variance estimates
+    # is number of batches + 1
+
     # h = score function
     score_fun = optimizer.compute_gradients(tf.reduce_mean(sample_logprobs), tf.trainable_variables())  # aggregated over batch
 
@@ -100,27 +102,56 @@ def expected_loss_objective_with_scorefun(decoder, optimizer) -> BanditObjective
     # compute variance
 
     #(x_n - x_mean_n-1)
-    cur_distance_from_mean = _subtract_gradients(score_fun, decoder.score_fun_mean)
+    cur_distance_from_mean = _subtract_gradients(score_fun,
+                                                 decoder.score_fun_mean)
     # (x_n - x_mean_n-1)/n
-    cur_distance_from_mean_norm = _scale_gradients(cur_distance_from_mean, tf.cast(decoder.iteration, tf.float32))
+    cur_distance_from_mean_norm = _scale_gradients(cur_distance_from_mean,
+                                                   1. / (tf.cast(
+                                                       decoder.step,
+                                                       tf.float32) + 1))
     # update mean of score function
     # x_mean_n = x_mean_n-1 + (x_n - x_mean_n-1)/n
-    decoder.score_fun_mean = _sum_gradients([decoder.score_fun_mean, cur_distance_from_mean_norm])
+    decoder.score_fun_mean = _sum_gradients([decoder.score_fun_mean,
+                                             cur_distance_from_mean_norm])
     # (x_n - x_mean_n)
-    cur_distance_from_new_mean = _subtract_gradients(score_fun, decoder.score_fun_mean)
+    cur_distance_from_new_mean = _subtract_gradients(score_fun,
+                                                     decoder.score_fun_mean)
     # (x_n - x_mean_n_1)* (x_n - x_mean_n)
-    cur_distance_from_mean_sq = _multiply_gradients([cur_distance_from_mean, cur_distance_from_new_mean])
+    cur_distance_from_mean_sq = _multiply_gradients([cur_distance_from_mean,
+                                                     cur_distance_from_new_mean])
     # update mean of distances from means
     # M_2,n = M_2,n-1 + (x_n - x_mean_n-1)*(x_n - x_mean_n)
-    decoder.dist_mean = _sum_gradients([decoder.dist_mean, cur_distance_from_mean_sq])
-    decoder.score_fun_variance = _scale_gradients(decoder.dist_mean, 1./(tf.cast(decoder.iteration, tf.float32)-1))
+    decoder.dist_mean = _sum_gradients([decoder.dist_mean,
+                                        cur_distance_from_mean_sq])
+    # variance = M_2,n / (n-1)
+    decoder.score_fun_variance = _scale_gradients(decoder.dist_mean,
+                                                  1. / (tf.cast(
+                                                      decoder.step,
+                                                      tf.float32)))
 
     # compute covariance
+
     # (y_n - y_mean_n-1)
-    cur_distance_from_mean_2 = _subtract_gradients(rewarded_score_fun, decoder.rewarded_score_fun_mean)
-    means_product = _multiply_gradients([cur_distance_from_mean_2, cur_distance_from_new_mean])
-    decoder.codist_mean = _sum_gradients([decoder.codist_mean, means_product])
-    decoder.covariance = _scale_gradients(decoder.codist_mean, 1./(tf.cast(decoder.iteration, tf.float32)))
+    cur_distance_from_mean_2 = _subtract_gradients(rewarded_score_fun,
+                                                   decoder.rewarded_score_fun_mean)
+    cur_distance_from_mean_2_norm = _scale_gradients(cur_distance_from_mean_2,
+                                                   1. / (tf.cast(
+                                                       decoder.step,
+                                                       tf.float32) + 1))
+    # update mean for rewarded score function
+    decoder.rewarded_score_fun_mean = _sum_gradients(
+        [decoder.rewarded_score_fun_mean, cur_distance_from_mean_2_norm])
+
+    # (x_n - x_mean_n) * (y_n - y_mean_n-1)
+    means_product = _multiply_gradients([cur_distance_from_mean_2,
+                                         cur_distance_from_new_mean])
+    # C_n = C_n-1 + (x_n - x_mean_n) * (y_n - y_mean_n-1)
+    decoder.codist_mean = _sum_gradients([decoder.codist_mean,
+                                          means_product])
+    # Cov = C_n/n
+    decoder.covariance = _scale_gradients(decoder.codist_mean,
+                                          1. / (tf.cast(
+                                              decoder.step, tf.float32)+1))
 
     # scaling a = cov(f,h)/var(h)
     scaling = _divide_gradients(decoder.covariance, decoder.score_fun_variance)  # for each component of the gradient

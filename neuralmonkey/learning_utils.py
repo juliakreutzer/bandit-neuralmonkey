@@ -390,7 +390,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 # sample, compute sample probs
                 sampling_result = tf_manager.execute_bandits(
-                    batch_dataset, [trainer], epoch=epoch_n-1, iteration=seen_instances,
+                    batch_dataset, [trainer], epoch=epoch_n-1, step=step,
                     update=False, summaries=False, rewards=None, baseline=None)
                 sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost, \
                 neg_sample_index = sampling_result[0].outputs[0]
@@ -599,7 +599,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 update_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=True,
                     summaries=False, rewards=rewards, baseline=baseline,
-                    epoch=epoch_n-1, iteration=seen_instances,
+                    epoch=epoch_n-1, step=step,
                     train=True, store_gradients=store_gradients
                 )
 
