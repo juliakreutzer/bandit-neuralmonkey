@@ -57,7 +57,6 @@ if __name__ == '__main__':
         print("Build IBM 1 model.")
 
     output_file = args.output
-    print(output_file)
     for word1 in ibm1.translation_table.keys():
         argmax = ""
         max = 0
