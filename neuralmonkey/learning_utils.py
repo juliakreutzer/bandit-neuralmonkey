@@ -771,6 +771,8 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
     wmt_client_python.configuration.host = tf_manager.get_host()
     api_instance = wmt_client_python.SharedTaskApi()
 
+    api_instance.reset_dataset()
+
     log("Starting training")
     reward_sum = initial_baseline*initial_seen_instances  # running sum over rewards
     training = True
@@ -808,7 +810,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
             # sample an output for the requested sentence
             sampling_result = tf_manager.execute_bandits(
-                batch_dataset, [trainer], epoch=0,  # TODO fix annealing: no epochs
+                batch_dataset, [trainer], epoch=0, step=step, # TODO fix annealing: no epochs
                 update=False, summaries=False, rewards=None)
             sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost,\
             neg_sample_index = sampling_result[0].outputs[0]
@@ -898,7 +900,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             # update model with samples and their rewards
             update_result = tf_manager.execute_bandits(
                 batch_dataset, [trainer], update=True,
-                summaries=False, rewards=rewards, baseline=baseline, epoch=0,  # TODO fix annealing: no epochs
+                summaries=False, rewards=rewards, baseline=baseline, epoch=0, step=step, # TODO fix annealing: no epochs
                 train=True, store_gradients=False
             )
             # summaries are False because they involve xent and target reference
