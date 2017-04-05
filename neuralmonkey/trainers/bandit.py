@@ -8,7 +8,7 @@ import tensorflow as tf
 # tests; pylint,mypy
 
 
-def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
+def exploit_only_objective(decoder, optimizer, initial_temperature) -> BanditObjective:
     """Get exploit only objective from decoder."""
     decoded_logprobs = tf.expand_dims(
         tf.expand_dims(
@@ -18,17 +18,7 @@ def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
         1)
     decoded = tf.expand_dims(tf.pack(decoder.decoded), 2)
     decoder.neg_sample_ix = tf.constant(-1)  # not used but must be set for fetches
-    return BanditObjective(
-        name="{} - exploit_only".format(decoder.name),
-        decoder=decoder,
-        samples=decoded,  # greedy output
-        sample_logprobs=decoded_logprobs,
-        loss=tf.reduce_mean(tf.mul(decoded_logprobs, -decoder.rewards),
-                             [0, 1]),
-        gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(  # mean gradient of batch and samples
-                            decoded_logprobs *  # score function
-                            tf.stop_gradient(  # don't differentiate this
+    scalars = tf.stop_gradient(  # don't differentiate this
                                             # loss from user feedback
                                             -(decoder.rewards - decoder.baseline)
                                             + # entropy regularizer T*(log p +1)
@@ -38,9 +28,16 @@ def exploit_only_objective(decoder, initial_temperature) -> BanditObjective:
                                                 decoder.epoch)
                                             * (decoded_logprobs + 1)
                             )
-            )
+    gradients = optimizer.compute_gradients(tf.reduce_mean(decoded_logprobs*scalars))
+    return BanditObjective(
+        name="{} - exploit_only".format(decoder.name),
+        decoder=decoder,
+        samples=decoded,  # greedy output
+        sample_logprobs=decoded_logprobs,
+        loss=tf.reduce_mean(tf.mul(decoded_logprobs, -decoder.rewards),
+                             [0, 1]),
+        gradients=gradients
         )
-    )
 
 def expected_loss_objective(decoder, optimizer, initial_temperature) -> BanditObjective:
     """Get expected loss objective from decoder."""
@@ -64,22 +61,6 @@ def expected_loss_objective(decoder, optimizer, initial_temperature) -> BanditOb
         loss=tf.reduce_mean(tf.mul(tf.exp(sample_logprobs), -decoder.rewards),
                              [0, 1]),
         gradients= scaled_gradients
-        #lambda grad_fun: grad_fun(
-        #    tf.reduce_mean(  # mean gradient of batch and samples
-        #                    sample_logprobs *  # score function
-        #                    tf.stop_gradient(  # don't differentiate this
-        #                                    # loss from user feedback
-        #                                    -(decoder.rewards-decoder.baseline)
-        #                                    + # entropy regularizer T*(log p +1)
-        #                                    # T is annealed
-        #                                    _get_temperature(
-        #                                        initial_temperature,
-        #                                        decoder.epoch)
-        #                                    * (sample_logprobs + 1)
-
-        #                    )
-        #    )
-        #)
     )
 
 
@@ -171,23 +152,13 @@ def expected_loss_objective_with_scorefun(decoder, optimizer) -> BanditObjective
     )
 
 
-def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
+def cross_entropy_objective(decoder, optimizer, initial_temperature, clip_prob, factor) \
         -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
     decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
 
-    return BanditObjective(
-        name="{} - cross-entropy".format(decoder.name),
-        decoder=decoder,
-        samples=sample_ids,
-        sample_logprobs=sample_logprobs,
-        loss=-tf.reduce_mean(tf.mul(sample_logprobs, decoder.rewards),
-                             [0, 1]),
-        gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(   # mean gradient of batch and samples
-                -sample_logprobs *  # score function
-                tf.stop_gradient(  # don't differentiate this
+    scalars = tf.stop_gradient(  # don't differentiate this
                                 ( (decoder.rewards-decoder.baseline) -
                                  # entropy regularizer T*(log p +1)
                                  # T is annealed
@@ -199,12 +170,21 @@ def cross_entropy_objective(decoder, initial_temperature, clip_prob, factor) \
                                 (factor*
                                  _clip_probs(tf.exp(sample_logprobs), clip_prob))
                 )
-            )
+    gradients = optimizer.compute_gradients(tf.reduce_mean(-sample_logprobs*scalars))
+
+    return BanditObjective(
+        name="{} - cross-entropy".format(decoder.name),
+        decoder=decoder,
+        samples=sample_ids,
+        sample_logprobs=sample_logprobs,
+        loss=-tf.reduce_mean(tf.mul(sample_logprobs, decoder.rewards),
+                             [0, 1]),
+        gradients=gradients
         )
-    )
 
 
-def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
+
+def pairwise_objective(decoder, optimizer, initial_temperature) -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     #sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
     #sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
@@ -215,19 +195,9 @@ def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
     decoder.neg_sample_ix = neg_ix
 
-    return BanditObjective(
-        name="{} - pairwise".format(decoder.name),
-        decoder=decoder,
-        samples=[sample_ids, sample_ids_2],
-        sample_logprobs=[sample_logprobs, sample_logprobs_2],
-        loss=tf.reduce_mean(tf.mul(tf.exp(pair_logprobs), -(1-decoder.rewards)),
-                             [0, 1]),
-        gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(  # mean gradient of batch and samples
-                pair_logprobs *  # score function
-                tf.stop_gradient(  # don't differentiate this
+    scalars = tf.stop_gradient(# don't differentiate this
                     # loss from user feedback
-                    -(1-decoder.rewards) +
+                    -(1-(decoder.rewards-decoder.baseline)) +
                     # entropy regularizer T*(log p +1)
                     # T is annealed
                     _get_temperature(
@@ -235,12 +205,20 @@ def pairwise_objective(decoder, initial_temperature) -> BanditObjective:
                         decoder.epoch)
                     * (pair_logprobs + 1)
                 )
-            )
+    gradients = optimizer.compute_gradients(tf.reduce_mean(pair_logprobs*scalars))
+
+    return BanditObjective(
+        name="{} - pairwise".format(decoder.name),
+        decoder=decoder,
+        samples=[sample_ids, sample_ids_2],
+        sample_logprobs=[sample_logprobs, sample_logprobs_2],
+        loss=tf.reduce_mean(tf.mul(tf.exp(pair_logprobs), -(1-decoder.rewards)),
+                             [0, 1]),
+        gradients=gradients
         )
-    )
 
 
-def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
+def pairwise_xent_objective(decoder, optimizer, initial_temperature, clip_prob, factor) \
         -> BanditObjective:
     """Get bandit cross-entropy loss objective from decoder."""
     #sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
@@ -255,18 +233,7 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
     pair_probs = tf.exp(pair_logprobs)
 
-    return BanditObjective(
-        name="{} - pairwise_xent".format(decoder.name),
-        decoder=decoder,
-        samples=[sample_ids, sample_ids_2],
-        sample_logprobs=[sample_logprobs,
-                         sample_logprobs_2],
-        loss=-tf.reduce_mean(tf.mul(pair_logprobs,
-                                    decoder.rewards), [0, 1]),
-        gradients=lambda grad_fun: grad_fun(
-            tf.reduce_mean(  # mean gradient of batch and samples
-                -pair_logprobs *  # score function
-                tf.stop_gradient(  # don't differentiate this
+    scalars = tf.stop_gradient(  # don't differentiate this
                     (decoder.rewards -
                      # entropy regularizer T*(log p +1)
                      # T is annealed
@@ -278,9 +245,18 @@ def pairwise_xent_objective(decoder, initial_temperature, clip_prob, factor) \
                     (factor *
                      _clip_probs(pair_probs, clip_prob))
                 )
-            )
+    gradients = optimizer.compute_gradients(tf.reduce_mean(-pair_logprobs*scalars))
+
+    return BanditObjective(
+        name="{} - pairwise_xent".format(decoder.name),
+        decoder=decoder,
+        samples=[sample_ids, sample_ids_2],
+        sample_logprobs=[sample_logprobs,
+                         sample_logprobs_2],
+        loss=-tf.reduce_mean(tf.mul(pair_logprobs,
+                                    decoder.rewards), [0, 1]),
+        gradients=gradients
         )
-    )
 
 
 def _get_temperature(initial_temperature, current_epoch):
@@ -343,7 +319,7 @@ class ExploitOnlyTrainer(GenericBanditTrainer):
                  optimizer=None, binary_feedback=False, store_gradients=False, baseline=False, score_function=False) -> None:
         self.store_gradients = store_gradients
         initial_temperature = initial_temperature
-        objective = exploit_only_objective(decoders[0],
+        objective = exploit_only_objective(decoders[0], optimizer,
                                             initial_temperature=initial_temperature)
         super(ExploitOnlyTrainer, self).__init__(
             objective, evaluator, l1_weight, l2_weight,
@@ -376,7 +352,7 @@ class CrossEntropyTrainer(GenericBanditTrainer):
                  optimizer=None, binary_feedback=False,
                  clip_prob=0.0, factor=1.0e10, store_gradients=False, baseline=False) -> None:
         self.store_gradients = store_gradients
-        objective = cross_entropy_objective(decoders[0],
+        objective = cross_entropy_objective(decoders[0], optimizer,
                                             initial_temperature=initial_temperature,
                                             clip_prob=clip_prob,
                                             factor=factor)
@@ -392,7 +368,7 @@ class PairwiseTrainer(GenericBanditTrainer):
                  l2_weight=0., initial_temperature=0., clip_norm=False,
                  optimizer=None, binary_feedback=False, store_gradients=False, baseline=False) -> None:
         self.store_gradients = store_gradients
-        objective = pairwise_objective(decoders[0],
+        objective = pairwise_objective(decoders[0], optimizer,
                                        initial_temperature=initial_temperature)
         super(PairwiseTrainer, self).__init__(
             objective, evaluator, l1_weight, l2_weight, clip_norm=clip_norm,
@@ -405,7 +381,7 @@ class PairwiseXentTrainer(GenericBanditTrainer):
                  optimizer=None, binary_feedback=False,
                  clip_prob=0., factor=1.0e-10, store_gradients=False, baseline=False) -> None:
         self.store_gradients = store_gradients
-        objective = pairwise_xent_objective(decoders[0],
+        objective = pairwise_xent_objective(decoders[0], optimizer,
                                             initial_temperature=initial_temperature,
                                             clip_prob=clip_prob,
                                             factor=factor)
