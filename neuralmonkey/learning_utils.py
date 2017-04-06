@@ -856,7 +856,12 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                     for g, s, p in zip(sentences_greedy,
                                        sentences, logprobs_per_sample[s]):
                         r = None
-                        translation_str = " ".join(s)
+
+                        source_len = len(wmt_sentence.split(" "))
+
+                        # the maximal translation length is 50x the length of the source
+                        max_target_len = 50 * source_len
+                        translation_str = " ".join(s[:max_target_len])
 
                         if translation_str == "":  # if sample is empty, use greedy
                             alt_str = " ".join(g)
@@ -865,8 +870,9 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                             translation_str = alt_str
 
                         translation_id = sentence_id
+
                         t = wmt_client_python.Translation(id=translation_id,
-                                                          translation=" ".join(s))
+                                                          translation=translation_str)
 
                         while r is None:
                             try:
