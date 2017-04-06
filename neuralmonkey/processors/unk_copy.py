@@ -1,5 +1,6 @@
 import re
 from typing import List
+import numpy as np
 
 
 class UNKCopyPostProcessor(object):
@@ -29,6 +30,7 @@ class UNKCopyPostProcessor(object):
         """
         Read lexical translations from file
         :param input_file:
+        :param threshold: probability threshold
         :return:
         """
         if input_file is None:
@@ -36,8 +38,8 @@ class UNKCopyPostProcessor(object):
         lex_translation_dict = dict()
         with open(input_file, "r", encoding=encoding) as opened_file:
             for line in opened_file:
-                source, target, prob = line.strip().split()
-                if float(prob) > threshold:
+                source, target, logprob = line.strip().split()
+                if np.exp(float(logprob)) > threshold:
                     lex_translation_dict[source] = target
         return lex_translation_dict
 

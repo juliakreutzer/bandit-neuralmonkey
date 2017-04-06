@@ -1,6 +1,7 @@
 from nltk.translate import AlignedSent, IBMModel1
 import argparse
 import operator
+import numpy as np
 
 
 def create_parser():
@@ -64,9 +65,9 @@ if __name__ == '__main__':
             if prob >= max:
                 max = prob
                 argmax = word2
-        output_file.write("{} {} {}\n".format(word1, argmax, max))
+        output_file.write("{} {} {}\n".format(word1, argmax, np.log(max)))
     if args.verbose:
-        print("Dumped IBM 1 model translation prob maxes to {}".format(output_file))
+        print("Dumped IBM 1 model translation logprob maxes to {}".format(output_file))
 
     #test_word = "Junge"
     #translation_probs = ibm1.translation_table[test_word]
