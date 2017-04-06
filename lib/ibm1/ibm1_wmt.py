@@ -24,6 +24,11 @@ def create_parser():
         help='File with endpoint'
     )
     parser.add_argument(
+        '--log_file', '-l', type=argparse.FileType('w'),
+        metavar='PATH',
+        help='File for logging'
+    )
+    parser.add_argument(
         '--verbose', '-v', action='store_true',
         help='verbose mode.')
 
@@ -91,12 +96,12 @@ if __name__ == '__main__':
 
         sum_rewards += r
 
-        if seen_instances % 10 == 0:
-            print("input sentence {}: {}".format(seen_instances, wmt_sentence))
-            print("translation: {}".format(translated))
-            print("reward: {}".format(r))
-            print("cum reward: {}".format(sum_rewards))
-            print("avg reward: {}".format(sum_rewards/seen_instances))
+        if seen_instances % 100 == 0:
+            args.log_file.write("input sentence {}: {}\n".format(seen_instances, wmt_sentence))
+            args.log_file.write("translation: {}".format(translated))
+            args.log_file.write("reward: {}".format(r))
+            args.log_file.write("cum reward: {}".format(sum_rewards))
+            args.log_file.write("avg reward: {}".format(sum_rewards/seen_instances))
 
 
 
