@@ -97,12 +97,12 @@ if __name__ == '__main__':
         sum_rewards += r
 
         if seen_instances % 100 == 0:
-            args.log_file.write("input sentence {}: {}\n".format(seen_instances, wmt_sentence))
-            args.log_file.write("translation: {}".format(translated))
-            args.log_file.write("reward: {}".format(r))
-            args.log_file.write("cum reward: {}".format(sum_rewards))
-            args.log_file.write("avg reward: {}".format(sum_rewards/seen_instances))
-
+            args.log_file.write("\ninput sentence {}: {}\n".format(seen_instances, wmt_sentence))
+            args.log_file.write("translation: {}\n".format(translated))
+            args.log_file.write("reward: {}\n".format(r))
+            args.log_file.write("cum reward: {}\n".format(sum_rewards))
+            args.log_file.write("avg reward: {}\n".format(sum_rewards/seen_instances))
+            args.log_file.flush()
 
 
 
