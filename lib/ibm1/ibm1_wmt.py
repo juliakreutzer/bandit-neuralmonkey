@@ -92,7 +92,7 @@ if __name__ == '__main__':
         sum_rewards += r
 
         if seen_instances % 10 == 0:
-            print("input sentence: {}".format(wmt_sentence))
+            print("input sentence {}: {}".format(seen_instances, wmt_sentence))
             print("translation: {}".format(translated))
             print("reward: {}".format(r))
             print("cum reward: {}".format(sum_rewards))
