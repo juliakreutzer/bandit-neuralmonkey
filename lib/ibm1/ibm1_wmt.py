@@ -34,12 +34,11 @@ def create_parser():
 
     return parser
 
-def read_lex(input_file, encoding="utf-8", threshold=0.0):
+def read_lex(input_file):
     lex_translation_dict = dict()
     for line in input_file:
         source, target, logprob = line.strip().split()
-        if float(logprob) > np.log(threshold):
-            lex_translation_dict[source] = target
+        lex_translation_dict[source] = target
     return lex_translation_dict
 
 
