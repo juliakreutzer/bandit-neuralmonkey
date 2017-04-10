@@ -12,6 +12,8 @@ from typing import Any, List, Union, Dict, Set
 import tensorflow as tf
 from neuralmonkey.logging import log
 from neuralmonkey.dataset import Dataset
+from tensorflow.python.ops import variables
+
 
 from neuralmonkey.runners.base_runner import (ExecutionResult,
                                               BanditExecutionResult,
@@ -66,7 +68,9 @@ class TensorFlowManager(object):
         init_op = tf.initialize_all_variables()
         for sess in self.sessions:
             sess.run(init_op)
-        self.saver = tf.train.Saver(max_to_keep=self.saver_max_to_keep)
+
+        self.saver = tf.train.Saver(max_to_keep=self.saver_max_to_keep,
+                                    var_list=variables._all_saveable_objects())
 
         if api_key_file is not None:
             self.api_key = self.api_key_from_file(api_key_file)
@@ -81,6 +85,7 @@ class TensorFlowManager(object):
                                  "is different than a number sessions ({})")
                                 .format(len(variable_files), num_sessions))
             self.restore(variable_files)
+
 
     # pylint: disable=too-many-locals
     def execute(self,
