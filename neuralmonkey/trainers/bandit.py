@@ -188,10 +188,10 @@ def pairwise_objective(decoder, optimizer, initial_temperature) -> BanditObjecti
     """Get bandit cross-entropy loss objective from decoder."""
     #sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
     #sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
-    #sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
-    #    _get_sample_pairs(decoder)
     sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
-        _get_sample_pairs_from_runtime_logits(decoder)
+        _get_sample_pairs(decoder)
+    #sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
+    #    _get_sample_pairs_from_runtime_logits(decoder)
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
     decoder.neg_sample_ix = neg_ix
 
@@ -227,7 +227,6 @@ def pairwise_xent_objective(decoder, optimizer, initial_temperature, clip_prob, 
     #sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
     sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
         _get_sample_pairs_from_runtime_logits(decoder)
-    pair_logprobs = (sample_logprobs + sample_logprobs_2)
     decoder.neg_sample_ix = neg_ix
 
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
@@ -290,15 +289,9 @@ def _get_samples(decoder, neg=False):
     return sample_ids, sample_logprobs, neg_ix
 
 def _get_sample_pairs(decoder):
-    sample_ids, sample_logprobs, neg_ix = _get_samples(decoder, neg=False)
-    greedy_logprobs = tf.expand_dims(
-        tf.expand_dims(
-            tf.reduce_sum(
-                tf.pack(decoder.decoded_logprobs), [0]),
-            0),
-        1)
-    greedy_ids = tf.expand_dims(tf.pack(decoder.decoded), 2)
-    return greedy_ids, sample_ids, greedy_logprobs, sample_logprobs, neg_ix
+    sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
+    sample_ids_neg, sample_logprobs_neg, neg_ix = _get_samples(decoder, neg=True)
+    return sample_ids, sample_ids_neg, sample_logprobs, sample_logprobs_neg, neg_ix
 
 def _get_sample_pairs_from_runtime_logits(decoder):
     """Sample from runtime logits"""

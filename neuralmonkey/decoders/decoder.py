@@ -331,9 +331,9 @@ class Decoder(ModelPart):
                            self.dropout_keep_prob,
                            self.train_mode)
 
-    def _logit_function(self, state: tf.Tensor) -> tf.Tensor:
+    def _logit_function(self, state: tf.Tensor, factor=1.0) -> tf.Tensor:
         state = dropout(state, self.dropout_keep_prob, self.train_mode)
-        return tf.matmul(state, self.decoding_w) + self.decoding_b
+        return tf.matmul(state, factor*self.decoding_w) + self.decoding_b
 
     def _get_rnn_cell(self) -> tf.nn.rnn_cell.RNNCell:
         if self._rnn_cell == 'GRU':
@@ -475,11 +475,15 @@ class Decoder(ModelPart):
                      for a in att_objects]
 
             # sample index to take negative logits for sampling
-            ix = tf.random_uniform((1,), 1, self.max_output_len+1, tf.int32)
-            ixtemp = tf.one_hot(ix, self.max_output_len+1, on_value=-temperature,
-                                off_value=temperature)
-            temps = tf.unpack(ixtemp, axis=1)
-            #temps = tf.unpack(sample_mode*tf.ones_like(ixtemp), axis=1)
+            ix = tf.random_uniform((1,), 1, self.max_output_len + 1, tf.int32)
+
+            # modify temperature for this index for negative sampling
+            if sample_mode < 0:
+                ixtemp = tf.one_hot(ix, self.max_output_len+1, on_value=-temperature,
+                                    off_value=temperature)
+                temps = tf.unpack(ixtemp, axis=1)
+            else:
+                temps = [1.0]*(self.max_output_len+1)
 
             voc_size = len(self.vocabulary)
 
@@ -494,11 +498,11 @@ class Decoder(ModelPart):
                 elif train_mode:
                     if i < self.max_output_len:
                         inp = train_inputs[i - 1]
-                        out_activation = self._logit_function(prev)
+                        out_activation = self._logit_function(prev, factor=temp)
                         if store_logits:
                             logits.append(out_activation)
                     else:
-                        out_activation = self._logit_function(prev)
+                        out_activation = self._logit_function(prev, factor=temp)
                         if store_logits:
                             logits.append(out_activation)
                         break
@@ -508,7 +512,7 @@ class Decoder(ModelPart):
                         # 2) sampling, either from positive or negative logits
                     with tf.variable_scope("loop_function", reuse=True):
 
-                        out_activation = self._logit_function(prev)
+                        out_activation = self._logit_function(prev, factor=temp)
                         if store_logits:
                             logits.append(out_activation)
 
@@ -518,7 +522,7 @@ class Decoder(ModelPart):
 
                         else:
                             # sampling
-                            out_activation = out_activation/temp
+                            out_activation = out_activation  #/temp
                             prev_word_index = tf.stop_gradient(tf.cast(
                                 tf.multinomial(out_activation, 1),
                                 tf.int32))  # batch_size x sample_size
