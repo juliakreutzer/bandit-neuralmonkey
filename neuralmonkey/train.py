@@ -183,7 +183,7 @@ def main() -> None:
                       vars_prefix=variables_file_prefix,
                       logging_period=cfg.model.logging_period,
                       postprocess=cfg.model.postprocess,
-                      peprocess=cfg.model.preprocess,
+                      preprocess=cfg.model.preprocess,
                       copypostprocess=cfg.model.copypostprocess,
                       save_every_n=cfg.model.save_every_n,
                       initial_seen_instances=cfg.args.initial_seen_instances,
