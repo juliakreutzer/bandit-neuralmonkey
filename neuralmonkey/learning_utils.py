@@ -805,8 +805,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             seen_instances += 1
 
             # received sentence as source series, preprocess (BPE)
-            max_length = 50  # TODO make parameter
-            raw_text_tokenized = wmt_sentence.split(" ")[:max_length]
+            raw_text_tokenized = wmt_sentence.split(" ")
             input_dict = {"source": [raw_text_tokenized]}
             if preprocess is not None:
                 text_preprocessed = preprocess(raw_text_tokenized)
@@ -825,8 +824,12 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                 vectors_to_sentences(greedy_outputs)
 
             if copypostprocess is not None:
-                inputs = batch_dataset.get_series("source")
-                sentences_greedy = copypostprocess(inputs, sentences_greedy)
+                if preprocess is not None:
+                    inputs = batch_dataset.get_series("source")
+                    sentences_greedy = copypostprocess(inputs, sentences_greedy)
+                else:  # BPE
+                    inputs = batch_dataset.get_series("source_bpe")
+                    sentences_greedy = copypostprocess(inputs, sentences_greedy)
 
             # evaluate samples
 
@@ -903,6 +906,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                                 log_print("Postprocessed {}: {}".format(
                                     seen_instances, " ".join(postprocess(g))))
                             log_print("Score: {}".format(r))
+                            log_print("Avg score: {}".format(reward_sum/float(seen_instances)))
                     rewards.append(sample_rewards)
 
             rewards = np.array(rewards).transpose()  # batch_size x sample_size
