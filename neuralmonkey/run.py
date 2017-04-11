@@ -199,7 +199,7 @@ def main() -> None:
                     CONFIG.model.tf_manager, CONFIG.model.runners,
                     batch_dataset, CONFIG.model.postprocess,
                     CONFIG.model.copypostprocess,
-                    write_out=True)
+                    write_out=False)
 
                 sentence = output_data["target_greedy"]
 
