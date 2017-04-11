@@ -187,7 +187,8 @@ def main() -> None:
                 seen_instances += 1
 
                 # received sentence as source series, preprocess (BPE)
-                raw_text_tokenized = wmt_sentence.split(" ")
+                max_length = 50
+                raw_text_tokenized = wmt_sentence.split(" ")[:max_length]
                 input_dict = {"source": [raw_text_tokenized]}
                 if preprocess is not None:
                     text_preprocessed = preprocess(raw_text_tokenized)
