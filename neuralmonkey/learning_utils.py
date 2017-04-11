@@ -862,11 +862,11 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                                        sentences, logprobs_per_sample[s]):
                         r = None
 
-                        source_len = len(wmt_sentence.split(" "))
+                        source_len = len(wmt_sentence)  # character len
 
                         # the maximal translation length is 50x the length of the source
                         max_target_len = 50 * source_len
-                        translation_str = " ".join(s[:max_target_len])
+                        translation_str = " ".join(s)[:max_target_len]
 
                         if translation_str == "":  # if sample is empty, use greedy
                             alt_str = " ".join(g)
@@ -896,6 +896,9 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                                 seen_instances, translation_str))
                             log_print("Greedy translation {}: {}".format(
                                 seen_instances, " ".join(g)))
+                            if postprocess is not None:
+                                log_print("Postprocessed {}: {}".format(
+                                    seen_instances, " ".join(postprocess(g))))
                             log_print("Score: {}".format(r))
                     rewards.append(sample_rewards)
 
