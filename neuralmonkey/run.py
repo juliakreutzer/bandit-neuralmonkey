@@ -201,7 +201,7 @@ def main() -> None:
                     CONFIG.model.copypostprocess,
                     write_out=True)
 
-                sentence = output_data["target"]
+                sentence = output_data["target_greedy"]
 
                 if copypostprocess is not None:
                     inputs = batch_dataset.get_series("source")
@@ -237,9 +237,6 @@ def main() -> None:
                             seen_instances, preprocess(wmt_sentence.split(" "))))
                     log_print("Translation sent back {}: {}".format(
                         seen_instances, translation_str))
-                    if postprocess is not None:
-                        log_print("Postprocessed {}: {}".format(
-                            seen_instances, " ".join(postprocess(g))))
                     log_print("Score: {}".format(reward))
                     log_print("Avg score: {}".format(rewards/seen_instances))
 
