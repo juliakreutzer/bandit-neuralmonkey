@@ -807,9 +807,11 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             # received sentence as source series, preprocess (BPE)
             max_length = 50  # TODO make parameter
             raw_text_tokenized = wmt_sentence.split(" ")[:max_length]
-            text_preprocessed = preprocess(raw_text_tokenized)
-            batch_dataset = Dataset("wmt_input", {
-                "source": [raw_text_tokenized], "source_bpe": [text_preprocessed]}, {})
+            input_dict = {"source": [raw_text_tokenized]}
+            if preprocess is not None:
+                text_preprocessed = preprocess(raw_text_tokenized)
+                input_dict["source_bpe"] = [text_preprocessed]
+            batch_dataset = Dataset("wmt_input",input_dict, {})
 
             # sample an output for the requested sentence
             sampling_result = tf_manager.execute_bandits(
