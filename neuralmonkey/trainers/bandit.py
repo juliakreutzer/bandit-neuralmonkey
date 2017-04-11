@@ -188,10 +188,12 @@ def pairwise_objective(decoder, optimizer, initial_temperature) -> BanditObjecti
     """Get bandit cross-entropy loss objective from decoder."""
     #sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
     #sample_ids_2, sample_logprobs_2, neg_ix = _get_samples(decoder, neg=True)
-    sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
-        _get_sample_pairs(decoder)
+    #sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
+    #    _get_sample_pairs(decoder)
     #sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
     #    _get_sample_pairs_from_runtime_logits(decoder)
+    sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
+        _get_sample_pairs_from_temp_runtime_logits(decoder)
     pair_logprobs = (sample_logprobs + sample_logprobs_2)
     decoder.neg_sample_ix = neg_ix
 
@@ -305,6 +307,19 @@ def _get_sample_pairs_from_runtime_logits(decoder):
     sample_logprobs2 = tf.expand_dims(sample_logprob2, 1)  # batch x sample_size
     return sample_ids, sample_ids2, sample_logprobs, sample_logprobs2, neg_ix
 
+def _get_sample_pairs_from_temp_runtime_logits(decoder):
+    """Sample from runtime logits, computed from optionally negated weights"""
+    sample_ids, sample_logprob, _ = decoder._sample_from_temp_runtime_logits(
+        neg=False)
+    sample_ids2, sample_logprob2, neg_ix = decoder._sample_from_temp_runtime_logits(
+        neg=True)
+    sample_ids = tf.expand_dims(tf.pack(sample_ids),
+                                2)  # time x batch x sample_size
+    sample_logprobs = tf.expand_dims(sample_logprob, 1)  # batch x sample_size
+    sample_ids2 = tf.expand_dims(tf.pack(sample_ids2),
+                                 2)  # time x batch x sample_size
+    sample_logprobs2 = tf.expand_dims(sample_logprob2, 1)  # batch x sample_size
+    return sample_ids, sample_ids2, sample_logprobs, sample_logprobs2, neg_ix
 
 class ExploitOnlyTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
