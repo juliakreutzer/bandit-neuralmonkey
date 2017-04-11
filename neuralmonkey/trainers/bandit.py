@@ -309,10 +309,7 @@ def _get_sample_pairs_from_runtime_logits(decoder):
 
 def _get_sample_pairs_from_temp_runtime_logits(decoder):
     """Sample from runtime logits, computed from optionally negated weights"""
-    sample_ids, sample_logprob, _ = decoder._sample_from_temp_runtime_logits(
-        neg=False)
-    sample_ids2, sample_logprob2, neg_ix = decoder._sample_from_temp_runtime_logits(
-        neg=True)
+    sample_ids, sample_ids2, sample_logprob, sample_logprob2, neg_ix = decoder._sample_pair_from_temp_runtime_logits()
     sample_ids = tf.expand_dims(tf.pack(sample_ids),
                                 2)  # time x batch x sample_size
     sample_logprobs = tf.expand_dims(sample_logprob, 1)  # batch x sample_size

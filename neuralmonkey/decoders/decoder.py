@@ -349,27 +349,26 @@ class Decoder(ModelPart):
         else:
             return self._runtime_attention_objects.get(encoder)
 
-    def _sample_from_temp_runtime_logits(self, neg=False):
+    def _sample_pair_from_temp_runtime_logits(self):
         # sample from logits resulting from negating weights in last layer
         sample_size = 1  # for now
         voc_size = len(self.vocabulary)
 
         sample_ids = []
+        sample_ids2 = []
         sample_logprob = 0.0
+        sample_logprob2 = 0.0
 
         # sampling from negative weights of last layer
-        ix = tf.constant(-1)
-        if neg:
-            ix = tf.random_uniform((1,), 0, len(self.runtime_logits),
-                                   tf.int32)
-            ixtemp = tf.one_hot(ix, len(self.runtime_logits), on_value=-1.,
-                                off_value=1.)
-            temps = tf.unpack(ixtemp, axis=1)
-        else:
-            temps = [1.0]*len(self.runtime_logits)
+        ix = tf.random_uniform((1,), 0, len(self.runtime_logits),
+                               tf.int32)
+        ixtemp = tf.one_hot(ix, len(self.runtime_logits), on_value=-1.,
+                            off_value=1.)
+        temps = tf.unpack(ixtemp, axis=1)
 
-        for hidden_state, temp  in zip(self.runtime_rnn_outputs, temps):
-            logprob = self._logit_function(hidden_state, temp)
+        for hidden_state, temp in zip(self.runtime_rnn_outputs, temps):
+            logprob = self._logit_function(hidden_state, 1.0)
+            logprob2 = self._logit_function(hidden_state, temp)
 
             # with gather and flattening
             sample_id = tf.stop_gradient(tf.cast(tf.multinomial(logprob, sample_size),
@@ -382,10 +381,26 @@ class Decoder(ModelPart):
                 tf.dynamic_partition(logprob, partitions=partitions,
                                      num_partitions=2)[1]
 
+            # with gather and flattening
+            sample_id2 = tf.stop_gradient(
+                tf.cast(tf.multinomial(logprob2, sample_size),
+                        tf.int32))  # batch_size x 1
+            sample_id2 = tf.squeeze(sample_id2, [1])  # batch_size
+
+            # use dynamic partition to get the logprobs of the samples
+            partitions = tf.one_hot(sample_id2, voc_size, dtype=tf.int32)
+            sample_logprob_word2 = \
+                tf.dynamic_partition(logprob2, partitions=partitions,
+                                     num_partitions=2)[1]
+
+            sample_ids2.append(sample_id2)
+            sample_logprob2 += sample_logprob_word2
+
             sample_ids.append(sample_id)
             sample_logprob += sample_logprob_word
 
-        return tf.pack(sample_ids), sample_logprob, ix
+        return tf.pack(sample_ids), tf.pack(sample_ids2), sample_logprob,  \
+               sample_logprob2, ix
 
 
 
