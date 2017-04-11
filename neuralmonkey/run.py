@@ -141,7 +141,7 @@ def main() -> None:
             variables = sys.argv[-1]
 
         initialize_for_running(CONFIG.model.output, CONFIG.model.tf_manager,
-                               variables)
+                               [variables])
 
         # WMT: only translating, not learning
         tf_manager = CONFIG.model.tf_manager
