@@ -41,6 +41,7 @@ def create_config() -> Configuration:
                         required=False, default=None)
     config.add_argument('minimize', bool, required=False, default=False)
     config.add_argument('postprocess')
+    config.add_argument('preprocess')
     config.add_argument('copypostprocess')
     config.add_argument('name', str)
     config.add_argument('random_seed', int, required=False)
@@ -182,6 +183,7 @@ def main() -> None:
                       vars_prefix=variables_file_prefix,
                       logging_period=cfg.model.logging_period,
                       postprocess=cfg.model.postprocess,
+                      peprocess=cfg.model.preprocess,
                       copypostprocess=cfg.model.copypostprocess,
                       save_every_n=cfg.model.save_every_n,
                       initial_seen_instances=cfg.args.initial_seen_instances,
