@@ -50,8 +50,6 @@ class GenericBanditTrainer(object):
             self.evaluator = evaluator
             self.baseline = baseline
 
-            print([v.name for v in tf.trainable_variables()])
-
             with tf.variable_scope('regularization'):
                 regularizable = [v for v in tf.trainable_variables()
                                  if BIAS_REGEX.findall(v.name)]
