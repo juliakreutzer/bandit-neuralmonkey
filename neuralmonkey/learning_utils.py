@@ -892,6 +892,9 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                         if step % logging_period == logging_period - 1:
                             log_print("WMT incoming sentence {}: {}".format(
                                 seen_instances, wmt_sentence))
+                            if preprocess is not None:
+                                log_print("preprocessed {}: {}".format(
+                                    seen_instances, preprocess(wmt_sentence.split(" "))))
                             log_print("Translation sent back {}: {}".format(
                                 seen_instances, translation_str))
                             log_print("Greedy translation {}: {}".format(
