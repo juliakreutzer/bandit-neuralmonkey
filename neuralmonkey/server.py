@@ -34,7 +34,8 @@ def post_request():
 
             _, response_data = run_on_dataset(
                 args.tf_manager, args.runners,
-                dataset, args.postprocess, write_out=False)
+                dataset, args.postprocess, args.copypostprocess, write_out=False
+                )
             code = 200
         # pylint: disable=broad-except
         except Exception as exc:

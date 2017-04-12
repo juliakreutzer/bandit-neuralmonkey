@@ -207,7 +207,8 @@ def pairwise_objective(decoder, optimizer, initial_temperature) -> BanditObjecti
                         decoder.epoch)
                     * (pair_logprobs + 1)
                 )
-    gradients = optimizer.compute_gradients(tf.reduce_mean(pair_logprobs*scalars))
+    gradients = optimizer.compute_gradients(tf.reduce_mean(pair_logprobs*scalars),
+                                            aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N)
 
     return BanditObjective(
         name="{} - pairwise".format(decoder.name),
