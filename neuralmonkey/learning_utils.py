@@ -905,7 +905,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                                 seen_instances, " ".join(g)))
                             if postprocess is not None:
                                 log_print("Postprocessed {}: {}".format(
-                                    seen_instances, " ".join(postprocess(g))))
+                                    seen_instances, " ".join(postprocess([g])[0])))
                             log_print("Score: {}".format(r))
                             log_print("Avg score: {}".format(reward_sum/float(seen_instances)))
                     rewards.append(sample_rewards)
