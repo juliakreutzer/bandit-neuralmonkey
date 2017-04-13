@@ -155,7 +155,7 @@ def main() -> None:
         wmt_client_python.configuration.host = tf_manager.get_host()
         api_instance = wmt_client_python.SharedTaskApi()
 
-        api_instance.reset_dataset()
+        #api_instance.reset_dataset()
 
         log("Start translating")
         finished = False
@@ -200,7 +200,7 @@ def main() -> None:
                     CONFIG.model.tf_manager, CONFIG.model.runners,
                     batch_dataset, CONFIG.model.postprocess,
                     CONFIG.model.copypostprocess,
-                    write_out=False)
+                    write_out=False, batch_size=1)
 
                 sentence = output_data["target_greedy"]
 

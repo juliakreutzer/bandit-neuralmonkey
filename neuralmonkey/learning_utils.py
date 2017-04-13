@@ -975,7 +975,7 @@ def run_on_dataset(tf_manager: TensorFlowManager,
                            for runner in runners)
     all_results = tf_manager.execute(dataset, runners,
                                      compute_losses=contains_targets,
-                                     batch_size=batch_size)
+                                     batch_size=batch_size, summaries=False)
 
     result_data = {runner.output_series: result.outputs
                        for runner, result in zip(runners, all_results)}

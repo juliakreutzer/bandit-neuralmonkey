@@ -28,13 +28,18 @@ def post_request():
         args = APP.config['args']
 
         try:
-            dataset = Dataset("request", request_data, {})
+            input_dict = {"source": [request_data.split()]}
+            if args.preprocess is not None:
+                text_preprocessed = args.preprocess(request_data.split())
+                input_dict["source_bpe"] = [text_preprocessed]
+            dataset = Dataset("wmt_input", input_dict, {})
+            #dataset = Dataset("source", request_data, {})
             # TODO check the dataset
             # check_dataset_and_coders(dataset, args.encoders)
 
             _, response_data = run_on_dataset(
-                args.tf_manager, args.runners,
-                dataset, args.postprocess, write_out=False)
+                args.tf_manager, args.runners, 
+                dataset, args.postprocess, args.copypostprocess, write_out=False)
             code = 200
         # pylint: disable=broad-except
         except Exception as exc:
