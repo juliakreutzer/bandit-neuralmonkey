@@ -194,7 +194,7 @@ def pairwise_objective(decoder, optimizer, initial_temperature) -> BanditObjecti
     #    _get_sample_pairs_from_runtime_logits(decoder)
     sample_ids, sample_ids_2, sample_logprobs, sample_logprobs_2, neg_ix = \
         _get_sample_pairs_from_temp_runtime_logits(decoder)
-    pair_logprobs = (sample_logprobs + sample_logprobs_2)
+    pair_logprobs = (sample_logprobs + sample_logprobs_2)/2
     decoder.neg_sample_ix = neg_ix
 
     scalars = tf.stop_gradient(# don't differentiate this
