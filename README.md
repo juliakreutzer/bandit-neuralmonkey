@@ -15,6 +15,8 @@ The higher-level API brings together a collection of standard building blocks
 (RNN encoder and decoder, multi-layer percetpron) and a simple way of adding new
 building blocks implemented directly in TensorFlow.
 
+This is the version of the code that was used for the ACL paper [Bandit Structured Prediction for Neural Sequence-to-Sequence Learning](https://arxiv.org/abs/1704.06497). For using bandit objectives, specify them in the `trainer` section of your configuration file. An example is given in `tests/small-bandit.ini`.
+
 ## Usage
 
 ```
