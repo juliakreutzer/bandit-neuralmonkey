@@ -20,6 +20,8 @@ from wmt_client_python.rest import ApiException
 # pylint: disable=invalid-name
 Evaluation = Dict[str, float]
 EvalConfiguration = List[Union[Tuple[str, Any], Tuple[str, str, Any]]]
+
+
 # pylint: enable=invalid-name
 
 
@@ -34,21 +36,20 @@ def training_loop(tf_manager: TensorFlowManager,
                   valuelog_dirs: List[str],
                   evaluators: EvalConfiguration,
                   runners: List[BaseRunner],
-                  test_datasets: Optional[List[Dataset]]=None,
+                  test_datasets: Optional[List[Dataset]] = None,
                   link_best_vars="/tmp/variables.data.best",
                   vars_prefix="/tmp/variables.data",
-                  logging_period: int=20,
-                  validation_period: int=500,
-                  runners_batch_size: Optional[int]=None,
-                  postprocess: Callable=None,
-                  copypostprocess: Callable=None,
-                  minimize_metric: bool=False,
-                  store_gradients: bool=False,
-                  batch_reward: bool=False,
-                  initial_seen_instances: int=0,
-                  initial_steps: int=0,
-                  initial_baseline: float=0.0):
-
+                  logging_period: int = 20,
+                  validation_period: int = 500,
+                  runners_batch_size: Optional[int] = None,
+                  postprocess: Callable = None,
+                  copypostprocess: Callable = None,
+                  minimize_metric: bool = False,
+                  store_gradients: bool = False,
+                  batch_reward: bool = False,
+                  initial_seen_instances: int = 0,
+                  initial_steps: int = 0,
+                  initial_baseline: float = 0.0):
     # TODO finish the list
     # TODO gradient storing not used here
     """
@@ -63,7 +64,7 @@ def training_loop(tf_manager: TensorFlowManager,
         val_dataset:
         postprocess: Function that takes the output sentence as produced by the
             decoder and transforms into tokenized sentence.
-        copypostprocess: Function that takes input and output sentence and copies
+        copypostprocess: Function that takes input, output sentence and copies
             part of the input to the output.
         log_directory: Directory where the TensordBoard log will be generated.
             If None, nothing will be done.
@@ -250,6 +251,7 @@ def training_loop(tf_manager: TensorFlowManager,
 
     log("Finished.")
 
+
 def bandit_training_loop(tf_manager: TensorFlowManager,
                          epochs: int,
                          trainer: GenericBanditTrainer,
@@ -260,22 +262,21 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                          valuelog_dirs: List[str],
                          evaluators: EvalConfiguration,
                          runners: List[BaseRunner],
-                         test_datasets: Optional[List[Dataset]]=None,
-                         save_n_best_vars: int=1,
+                         test_datasets: Optional[List[Dataset]] = None,
+                         save_n_best_vars: int = 1,
                          link_best_vars="/tmp/variables.data.best",
                          vars_prefix="/tmp/variables.data",
-                         logging_period: int=20,
-                         validation_period: int=500,
-                         runners_batch_size: Optional[int]=None,
-                         postprocess: Callable=None,
-                         copypostprocess: Callable=None,
-                         minimize_metric: bool=False,
-                         store_gradients: bool=False,
-                         batch_reward: bool=False,
+                         logging_period: int = 20,
+                         validation_period: int = 500,
+                         runners_batch_size: Optional[int] = None,
+                         postprocess: Callable = None,
+                         copypostprocess: Callable = None,
+                         minimize_metric: bool = False,
+                         store_gradients: bool = False,
+                         batch_reward: bool = False,
                          initial_seen_instances: int = 0,
                          initial_steps: int = 0,
                          initial_baseline: float = 0.0):
-
     """
     Performs the training loop for given graph and data.
     Args:
@@ -287,7 +288,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
         val_dataset:
         postprocess: Function that takes the output sentence as produced by the
             decoder and transforms into tokenized sentence.
-        copypostprocess: Function that takes input and output sentence and copies
+        copypostprocess: Function that takes input, output sentence and copies
             part of the input to the output.
         log_directory: Directory where the TensordBoard log will be generated.
             If None, nothing will be done.
@@ -353,7 +354,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
     log("Initial result on dev: ")
     val_results, val_outputs = run_on_dataset(
         tf_manager, runners, val_dataset,
-        postprocess=None, copypostprocess=copypostprocess, write_out=False,  # TODO fix?
+        postprocess=None, copypostprocess=copypostprocess, write_out=False,
         batch_size=runners_batch_size)
     val_evaluation = evaluation(
         evaluators, val_dataset, runners, val_results,
@@ -373,7 +374,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
         [os.makedirs(v, exist_ok=True) for v in valuelog_dirs]
 
     log("Starting training")
-    reward_sum = initial_seen_instances*initial_baseline   # running sum over rewards
+    reward_sum = initial_seen_instances * initial_baseline
     try:
         for epoch_n in range(1, epochs + 1):
             log_print("")
@@ -390,7 +391,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                 # sample, compute sample probs
                 sampling_result = tf_manager.execute_bandits(
-                    batch_dataset, [trainer], epoch=epoch_n-1, step=step,
+                    batch_dataset, [trainer], epoch=epoch_n - 1, step=step,
                     update=False, summaries=False, rewards=None, baseline=None)
                 sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost, \
                 neg_sample_index = sampling_result[0].outputs[0]
@@ -404,7 +405,6 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 if copypostprocess is not None:
                     inputs = batch_dataset.get_series("source")
                     sentences_greedy = copypostprocess(inputs, sentences_greedy)
-
 
                 # evaluate samples
                 dataset_id, function = trainer.evaluator
@@ -423,14 +423,14 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                     number_of_samples = pos_samples.shape[2]
                     pos_outputs_per_sample = np.array_split(pos_samples,
-                                                        number_of_samples,
-                                                        axis=2)
+                                                            number_of_samples,
+                                                            axis=2)
                     neg_outputs_per_sample = np.array_split(neg_samples,
-                                                        number_of_samples,
-                                                        axis=2)
+                                                            number_of_samples,
+                                                            axis=2)
                     pos_logprobs_per_sample = np.array_split(pos_logprobs,
-                                                         number_of_samples,
-                                                         axis=1)
+                                                             number_of_samples,
+                                                             axis=1)
                     neg_logprobs_per_sample = np.array_split(neg_logprobs,
                                                              number_of_samples,
                                                              axis=1)
@@ -445,7 +445,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         neg_sentences = trainer.objective.decoder.vocabulary. \
                             vectors_to_sentences(
                             neg_outputs_per_sample[s])  # FIXME ugly
- 
+
                         if postprocess is not None:
                             pos_sentences = postprocess(pos_sentences)
                             neg_sentences = postprocess(neg_sentences)
@@ -456,8 +456,10 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                         if copypostprocess is not None:
                             inputs = batch_dataset.get_series("source")
-                            pos_sentences = copypostprocess(inputs, pos_sentences)
-                            neg_sentences = copypostprocess(inputs, neg_sentences)
+                            pos_sentences = copypostprocess(inputs,
+                                                            pos_sentences)
+                            neg_sentences = copypostprocess(inputs,
+                                                            neg_sentences)
 
                         desired_output = batch_dataset.get_series(dataset_id)
 
@@ -475,18 +477,22 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                             sample_rewards.extend([reward] * len(pos_sentences))
 
                             if step % logging_period == 0:
-                                log("[Example batch] avg logprob: {}\n{}: {}".format(
-                                    np.mean(pos_logprobs_per_sample[s]+neg_logprobs_per_sample[s]),
+                                log("[Example batch] avg logprob: {}\n{}: "
+                                    "{}".format(np.mean(
+                                    pos_logprobs_per_sample[s]
+                                    + neg_logprobs_per_sample[s]),
                                     function.name, reward))
 
                         # evaluate every sentence pair separately
                         else:
-                            for d, g, s1, s2, p1, p2, idx in zip(desired_output,
-                                                            sentences_greedy,
-                                                            pos_sentences, neg_sentences,
-                                                            pos_logprobs_per_sample[s],
-                                                            neg_logprobs_per_sample[s],
-                                                            neg_sample_index):
+                            for d, g, s1, s2, p1, p2, idx in \
+                                    zip(desired_output,
+                                        sentences_greedy,
+                                        pos_sentences,
+                                        neg_sentences,
+                                        pos_logprobs_per_sample[s],
+                                        neg_logprobs_per_sample[s],
+                                        neg_sample_index):
 
                                 r1 = function([s1], [d])
                                 r2 = function([s2], [d])
@@ -502,7 +508,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                                 i = 1
 
-                                # check whether position for negative sampling is before EOS
+                                # check whether position for negative
+                                # sampling is before EOS
                                 if idx >= len(s2):
                                     neg_word = "<outside>"
                                 else:
@@ -510,40 +517,46 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                                 if len(rewards) <= 5 \
                                         and step % logging_period == 0:
-                                    # TODO some evaluators might return error not reward
-                                    log("[Example {}]\nref: {}\ngreedy: {}\nsample_1: {}"
+                                    log(
+                                        "[Example {}]\nref: {}\ngreedy: {}"
+                                        "\nsample_1: {}"
                                         "\nlogprob: {}\n{}: {}\nsample_2: {}"
                                         "\nlogprob: {}\nneg sample ix: {} ({})"
                                         "\n{}: {}".format(i,
-                                                                   " ".join(d),
-                                                                   " ".join(g),
-                                                                   " ".join(s1),
-                                                                   np.exp(p1),
-                                                                   function.name,
-                                                                   r1,
-                                                                   " ".join(s2),
-                                                                   np.exp(p2),
-                                                                   idx, neg_word,
-                                                                   function.name,
-                                                                   r2))
+                                                          " ".join(d),
+                                                          " ".join(g),
+                                                          " ".join(s1),
+                                                          np.exp(p1),
+                                                          function.name,
+                                                          r1,
+                                                          " ".join(s2),
+                                                          np.exp(p2),
+                                                          idx, neg_word,
+                                                          function.name,
+                                                          r2))
                                     log("pair reward: {}, diff logprob: {}".
-                                          format(reward, (p1-p2)))
+                                        format(reward, (p1 - p2)))
                                     i += 1
                         rewards.append(sample_rewards)
 
                 # for objectives without pairwise comparisons
                 else:
-                    # sampled_output has shape: time_steps x batch_size x sample_size
+                    # sampled_output: time_steps x batch_size x sample_size
                     number_of_samples = sampled_outputs.shape[2]
-                    outputs_per_sample = np.array_split(sampled_outputs, number_of_samples, axis=2)
+                    outputs_per_sample = np.array_split(sampled_outputs,
+                                                        number_of_samples,
+                                                        axis=2)
                     # sampled_logprobs has shape: batch_size x sample_size
-                    logprobs_per_sample = np.array_split(sampled_logprobs, number_of_samples, axis=1)
+                    logprobs_per_sample = np.array_split(sampled_logprobs,
+                                                         number_of_samples,
+                                                         axis=1)
 
                     for s in range(number_of_samples):
                         sample_rewards = []
                         # ids to words
-                        sentences = trainer.objective.decoder.vocabulary.\
-                            vectors_to_sentences(outputs_per_sample[s])  # FIXME ugly
+                        sentences = trainer.objective.decoder.vocabulary. \
+                            vectors_to_sentences(
+                            outputs_per_sample[s])  # FIXME ugly
 
                         if postprocess is not None:
                             sentences = postprocess(sentences)
@@ -557,37 +570,45 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                         # evaluate whole batch as corpus
                         if batch_reward:
                             r = function(sentences, desired_output)
-                            sample_rewards.extend([r]*len(sentences))
+                            sample_rewards.extend([r] * len(sentences))
 
                             if step % logging_period == 0:
-                                log("[Example batch]\navg logprob: {}\n{}: {}".format(
-                                                                     np.mean(logprobs_per_sample[s]),
-                                                                     function.name, r))
+                                log(
+                                    "[Example batch]\navg logprob: {}\n{}:"
+                                    " {}".format(
+                                        np.mean(logprobs_per_sample[s]),
+                                        function.name, r))
 
                         # evaluate every sentence separately
                         else:
                             i = 1
                             # iterate over batch
-                            for d, g, s, p in zip(desired_output, sentences_greedy,
-                                                  sentences, logprobs_per_sample[s]):
+                            for d, g, s, p in zip(desired_output,
+                                                  sentences_greedy,
+                                                  sentences,
+                                                  logprobs_per_sample[s]):
                                 r = function([s], [d])
                                 sample_rewards.append(r)
 
                                 # TODO no binary version here yet
 
-                                if len(sample_rewards) <= 5\
+                                if len(sample_rewards) <= 5 \
                                         and step % logging_period == 0:
-                                    log("[Example {}]\nref: {}\ngreedy: {}\nsample: "
-                                        "{}\nlogprob: {}\n{}: {}".format(i,
-                                                             " ".join(d),
-                                                             " ".join(g),
-                                                             " ".join(s),
-                                                             np.exp(p),
-                                                             function.name, r))
+                                    log(
+                                        "[Example {}]\nref: {}\ngreedy: {}"
+                                        "\nsample: {}\nlogprob: {}"
+                                        "\n{}: {}".format(i,
+                                                          " ".join(d),
+                                                          " ".join(g),
+                                                          " ".join(s),
+                                                          np.exp(p),
+                                                          function.name,
+                                                          r))
                                     i += 1
                         rewards.append(sample_rewards)
 
-                rewards = np.array(rewards).transpose()  # batch_size x sample_size
+                # batch_size x sample_size
+                rewards = np.array(rewards).transpose()
                 reward_sum += np.sum(rewards)
 
                 if trainer.baseline:
@@ -599,12 +620,13 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 update_result = tf_manager.execute_bandits(
                     batch_dataset, [trainer], update=True,
                     summaries=False, rewards=rewards, baseline=baseline,
-                    epoch=epoch_n-1, step=step,
+                    epoch=epoch_n - 1, step=step,
                     train=True, store_gradients=store_gradients
                 )
 
                 if store_gradients:
-                    stochastic_gradient, stochastic_update = update_result[0].outputs[0]
+                    stochastic_gradient, stochastic_update = \
+                        update_result[0].outputs[0]
 
                 if step % logging_period == 0:
                     log("Batch avg reward {}".format(np.mean(rewards)))
@@ -615,7 +637,8 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                 if step % logging_period == logging_period - 1:
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
-                        postprocess=None, copypostprocess=copypostprocess, write_out=False)
+                        postprocess=None, copypostprocess=copypostprocess,
+                        write_out=False)
                     train_evaluation = evaluation(
                         evaluators, batch_dataset, runners,
                         train_results, train_outputs)
@@ -631,18 +654,21 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                     # write out gradients, updates and rewards
                     if store_gradients:
-                        np.save("{}/{}".format(valuelog_dirs[0], seen_instances),
-                                stochastic_gradient)
-                        np.save("{}/{}".format(valuelog_dirs[1], seen_instances),
-                                stochastic_update)
-                        np.save("{}/{}".format(valuelog_dirs[2], seen_instances),
-                                rewards)
-
+                        np.save(
+                            "{}/{}".format(valuelog_dirs[0], seen_instances),
+                            stochastic_gradient)
+                        np.save(
+                            "{}/{}".format(valuelog_dirs[1], seen_instances),
+                            stochastic_update)
+                        np.save(
+                            "{}/{}".format(valuelog_dirs[2], seen_instances),
+                            rewards)
 
                 if step % validation_period == validation_period - 1:
                     val_results, val_outputs = run_on_dataset(
                         tf_manager, runners, val_dataset,
-                        postprocess=None, copypostprocess=copypostprocess, write_out=False,
+                        postprocess=None, copypostprocess=copypostprocess,
+                        write_out=False,
                         batch_size=runners_batch_size)
                     val_evaluation = evaluation(
                         evaluators, val_dataset, runners, val_results,
@@ -722,27 +748,29 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
     for dataset in test_datasets:
         test_results, test_outputs = run_on_dataset(
-            tf_manager, runners, dataset, postprocess=None, copypostprocess=copypostprocess,
+            tf_manager, runners, dataset, postprocess=None,
+            copypostprocess=copypostprocess,
             write_out=True, batch_size=runners_batch_size)
         eval_result = evaluation(evaluators, dataset, runners,
                                  test_results, test_outputs)
         print_final_evaluation(dataset.name, eval_result)
 
+
 log("Finished.")
+
 
 # pylint: disable=too-many-arguments, too-many-locals, too-many-branches
 def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
-                         trainer: GenericBanditTrainer,
-                         save_every_n: int=1000,
-                         vars_prefix="/tmp/variables.data",
-                         logging_period: int=20,
-                         postprocess: Callable=None,
-                         preprocess: Callable=None,
-                         copypostprocess: Callable=None,
-                         initial_seen_instances: int=0,
-                         initial_steps: int=0,
-                         initial_baseline: float=0.0):
-
+                             trainer: GenericBanditTrainer,
+                             save_every_n: int = 1000,
+                             vars_prefix="/tmp/variables.data",
+                             logging_period: int = 20,
+                             postprocess: Callable = None,
+                             preprocess: Callable = None,
+                             copypostprocess: Callable = None,
+                             initial_seen_instances: int = 0,
+                             initial_steps: int = 0,
+                             initial_baseline: float = 0.0):
     """
     Performs the training loop for given graph and WMT data.
 
@@ -753,7 +781,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             the loss and optimization operation.
         postprocess: Function that takes the output sentence as produced by the
             decoder and transforms into tokenized sentence.
-        copypostprocess: Function that takes input and output sentence and copies
+        copypostprocess: Function that takes input, output sentence and copies
             part of the input to the output.
         evaluators: List of evaluators. The last evaluator is used as the main.
             An evaluator is a tuple of the name of the generated series, the
@@ -768,14 +796,15 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
     tf_manager.save(vars_prefix)
 
-    wmt_client_python.configuration.api_key['x-api-key'] = tf_manager.get_api_key()
+    wmt_client_python.configuration.api_key[
+        'x-api-key'] = tf_manager.get_api_key()
     wmt_client_python.configuration.host = tf_manager.get_host()
     api_instance = wmt_client_python.SharedTaskApi()
 
     api_instance.reset_dataset()
 
     log("Starting training")
-    reward_sum = initial_baseline*initial_seen_instances  # running sum over rewards
+    reward_sum = initial_baseline * initial_seen_instances
     training = True
 
     try:
@@ -811,13 +840,13 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             if preprocess is not None:
                 text_preprocessed = preprocess(raw_text_tokenized)
                 input_dict["source_bpe"] = [text_preprocessed]
-            batch_dataset = Dataset("wmt_input",input_dict, {})
+            batch_dataset = Dataset("wmt_input", input_dict, {})
 
             # sample an output for the requested sentence
             sampling_result = tf_manager.execute_bandits(
                 batch_dataset, [trainer], epoch=0, step=step,
                 update=False, summaries=False, rewards=None)
-            sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost,\
+            sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost, \
             neg_sample_index = sampling_result[0].outputs[0]
 
             # get greedy translation
@@ -842,16 +871,18 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
             # for objectives without pairwise comparisons
             else:
-                # sampled_output has shape: time_steps x batch_size x sample_size
+                # sampled_output: time_steps x batch_size x sample_size
                 number_of_samples = sampled_outputs.shape[2]
-                outputs_per_sample = np.array_split(sampled_outputs, number_of_samples, axis=2)
+                outputs_per_sample = np.array_split(sampled_outputs,
+                                                    number_of_samples, axis=2)
                 # sampled_logprobs has shape: batch_size x sample_size
-                logprobs_per_sample = np.array_split(sampled_logprobs, number_of_samples, axis=1)
+                logprobs_per_sample = np.array_split(sampled_logprobs,
+                                                     number_of_samples, axis=1)
 
                 for s in range(number_of_samples):
                     sample_rewards = []
                     # ids to words
-                    sentences = trainer.objective.decoder.vocabulary.\
+                    sentences = trainer.objective.decoder.vocabulary. \
                         vectors_to_sentences(outputs_per_sample[s])
 
                     if postprocess is not None:
@@ -868,28 +899,32 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
                         source_len = len(wmt_sentence)  # character len
 
-                        # the maximal translation length is 50x the length of the source
+                        # max translation length is 50x the length of the source
                         max_target_len = 50 * source_len
                         translation_str = " ".join(s)[:max_target_len]
 
-                        if translation_str == "":  # if sample is empty, use greedy
+                        # if sample is empty, use greedy
+                        if translation_str == "":
                             alt_str = " ".join(g)
-                            if alt_str == "":  # if greedy is also empty, send back source
+                            # if greedy is also empty, send back source
+                            if alt_str == "":
                                 alt_str = wmt_sentence
                             translation_str = alt_str
 
                         translation_id = sentence_id
 
-                        t = wmt_client_python.Translation(id=translation_id,
-                                                          translation=translation_str)
+                        t = wmt_client_python.Translation(
+                            id=translation_id, translation=translation_str)
 
                         while r is None:
                             try:
-                                translation_response = api_instance.send_translation(t)
+                                translation_response = \
+                                    api_instance.send_translation(t)
                                 r = translation_response.score
                             except ApiException as e:
-                                log_print("Exception when calling send_translation:"
-                                      " {}\n".format(e))
+                                log_print(
+                                    "Exception when calling send_translation:"
+                                    " {}\n".format(e))
 
                         sample_rewards.append(r)
 
@@ -898,16 +933,20 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                                 seen_instances, wmt_sentence))
                             if preprocess is not None:
                                 log_print("preprocessed {}: {}".format(
-                                    seen_instances, preprocess(wmt_sentence.split(" "))))
+                                    seen_instances,
+                                    preprocess(wmt_sentence.split(" "))))
                             log_print("Translation sent back {}: {}".format(
                                 seen_instances, translation_str))
                             log_print("Greedy translation {}: {}".format(
                                 seen_instances, " ".join(g)))
                             if postprocess is not None:
                                 log_print("Postprocessed {}: {}".format(
-                                    seen_instances, " ".join(postprocess([g])[0])))
+                                    seen_instances, " ".join(
+                                        postprocess([g])[0])))
                             log_print("Score: {}".format(r))
-                            log_print("Avg score: {}".format(reward_sum/float(seen_instances)))
+                            log_print("Avg score: {}".format(
+                                reward_sum / float(seen_instances)))
+                            log_print("Sum score: {}".format(reward_sum))
                     rewards.append(sample_rewards)
 
             rewards = np.array(rewards).transpose()  # batch_size x sample_size
@@ -922,8 +961,8 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             # update model with samples and their rewards
             update_result = tf_manager.execute_bandits(
                 batch_dataset, [trainer], update=True,
-                summaries=False, rewards=rewards, baseline=baseline, epoch=0, step=step, # TODO fix annealing: no epochs
-                train=True, store_gradients=False
+                summaries=False, rewards=rewards, baseline=baseline,
+                epoch=0, step=step, train=True, store_gradients=False
             )
             # summaries are False because they involve xent and target reference
 
@@ -948,10 +987,10 @@ def run_on_dataset(tf_manager: TensorFlowManager,
                    dataset: Dataset,
                    postprocess: Callable,
                    copypostprocess: Callable,
-                   write_out: bool=False,
-                   batch_size: Optional[int]=None) \
-                                                -> Tuple[List[ExecutionResult],
-                                                         Dict[str, List[Any]]]:
+                   write_out: bool = False,
+                   batch_size: Optional[int] = None) \
+        -> Tuple[List[ExecutionResult],
+                 Dict[str, List[Any]]]:
     """Apply the model on a dataset and optionally write outputs to files.
 
     Args:
@@ -978,17 +1017,17 @@ def run_on_dataset(tf_manager: TensorFlowManager,
                                      batch_size=batch_size, summaries=False)
 
     result_data = {runner.output_series: result.outputs
-                       for runner, result in zip(runners, all_results)}
+                   for runner, result in zip(runners, all_results)}
 
     if postprocess is not None:
         for series_name, outputs in result_data.items():
             result_data[series_name] = postprocess(outputs)
-         
+
     if copypostprocess is not None:
         inputs = dataset.get_series("source")
 
         for series_name, outputs in result_data.items():
-            #print("outputs {}".format(outputs))
+            # print("outputs {}".format(outputs))
             copypostprocessed = copypostprocess(inputs, outputs)
             result_data[series_name] = copypostprocessed
 
@@ -1035,7 +1074,7 @@ def evaluation(evaluators, dataset, runners, execution_results, result_data):
     # evaluation metrics
     for generated_id, dataset_id, function in evaluators:
         if (not dataset.has_series(dataset_id) or
-                generated_id not in result_data):
+                    generated_id not in result_data):
             continue
 
         desired_output = dataset.get_series(dataset_id)
@@ -1054,13 +1093,13 @@ def _log_continuous_evaluation(tb_writer: tf.train.SummaryWriter,
                                epoch: int,
                                max_epochs: int,
                                execution_results: List[ExecutionResult],
-                               train: bool=False) -> None:
+                               train: bool = False) -> None:
     """Log the evaluation results and the TensorBoard summaries."""
 
     color, prefix = ("yellow", "train") if train else ("blue", "val")
 
     if tf_manager.report_gpu_memory_consumption:
-        meminfostr = "  "+gpu_memusage()
+        meminfostr = "  " + gpu_memusage()
     else:
         meminfostr = ""
 
@@ -1068,7 +1107,7 @@ def _log_continuous_evaluation(tb_writer: tf.train.SummaryWriter,
     eval_string = "Epoch {}/{}  Instances {}  {}".format(epoch, max_epochs,
                                                          seen_instances,
                                                          eval_string)
-    eval_string = eval_string+meminfostr
+    eval_string = eval_string + meminfostr
     log(eval_string, color=color)
 
     if tb_writer:
@@ -1077,7 +1116,7 @@ def _log_continuous_evaluation(tb_writer: tf.train.SummaryWriter,
                               result.histogram_summaries,
                               result.image_summaries]:
                 if summaries is not None:
-                   tb_writer.add_summary(summaries, seen_instances)
+                    tb_writer.add_summary(summaries, seen_instances)
 
         external_str = \
             tf.Summary(value=[tf.Summary.Value(tag=prefix + "_" + name,
