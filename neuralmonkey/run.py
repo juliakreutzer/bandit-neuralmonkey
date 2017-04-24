@@ -44,7 +44,7 @@ CONFIG.ignore_argument('store_gradients')
 CONFIG.ignore_argument('batch_reward')
 CONFIG.ignore_argument('initial_baseline')
 CONFIG.ignore_argument('initial_steps')
-
+CONFIG.ignore_argument('save_every_n')
 
 def default_variable_file(output_dir):
     variables_file = os.path.join(output_dir, "variables.data.best")
