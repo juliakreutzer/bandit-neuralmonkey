@@ -9,8 +9,6 @@ from neuralmonkey.gradient_utils import sum_gradients, scale_gradients, \
 
 
 # tests; pylint,mypy
-
-
 def exploit_only_objective(decoder, optimizer, initial_temperature) -> \
         BanditObjective:
     """Get exploit only objective from decoder."""
@@ -69,97 +67,6 @@ def expected_loss_objective(decoder, optimizer, initial_temperature) \
             tf.mul(tf.exp(sample_logprobs), -decoder.rewards), [0, 1]),
         gradients=scaled_gradients
     )
-
-
-def expected_loss_objective_with_scorefun(decoder, optimizer) -> \
-        BanditObjective:
-    """Get expected loss objective with score function control variate."""
-    sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
-    decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
-
-    # update online covariance and variance estimates
-
-    # h = score function
-    # aggregated over batch
-    score_fun = optimizer.compute_gradients(tf.reduce_mean(sample_logprobs),
-                                            tf.trainable_variables())
-
-    # f = score function * reward
-    rewarded_score_fun = optimizer.compute_gradients(
-        tf.reduce_mean(sample_logprobs * -decoder.rewards),
-        tf.trainable_variables())  # aggregated over batch
-
-    # compute variance
-
-    # (x_n - x_mean_n-1)
-    cur_distance_from_mean = subtract_gradients(score_fun,
-                                                decoder.score_fun_mean)
-    # (x_n - x_mean_n-1)/n
-    cur_distance_from_mean_norm = scale_gradients(cur_distance_from_mean,
-                                                  1. / (tf.cast(
-                                                      decoder.step,
-                                                      tf.float32) + 1))
-    # update mean of score function
-    # x_mean_n = x_mean_n-1 + (x_n - x_mean_n-1)/n
-    decoder.score_fun_mean = sum_gradients([decoder.score_fun_mean,
-                                            cur_distance_from_mean_norm])
-    # (x_n - x_mean_n)
-    cur_distance_from_new_mean = subtract_gradients(score_fun,
-                                                    decoder.score_fun_mean)
-    # (x_n - x_mean_n_1)* (x_n - x_mean_n)
-    cur_distance_from_mean_sq = multiply_gradients(
-        [cur_distance_from_mean, cur_distance_from_new_mean])
-
-    # update mean of distances from means
-    # M_2,n = M_2,n-1 + (x_n - x_mean_n-1)*(x_n - x_mean_n)
-    decoder.dist_mean = sum_gradients([decoder.dist_mean,
-                                       cur_distance_from_mean_sq])
-    # variance = M_2,n / (n-1)
-    decoder.score_fun_variance = scale_gradients(decoder.dist_mean,
-                                                 1. / (tf.cast(
-                                                     decoder.step,
-                                                     tf.float32)))
-
-    # compute covariance
-
-    # (y_n - y_mean_n-1)
-    cur_distance_from_mean_2 = subtract_gradients(
-        rewarded_score_fun, decoder.rewarded_score_fun_mean)
-    cur_distance_from_mean_2_norm = scale_gradients(
-        cur_distance_from_mean_2, 1. / (tf.cast(decoder.step, tf.float32) + 1))
-    # update mean for rewarded score function
-    decoder.rewarded_score_fun_mean = sum_gradients(
-        [decoder.rewarded_score_fun_mean, cur_distance_from_mean_2_norm])
-
-    # (x_n - x_mean_n) * (y_n - y_mean_n-1)
-    means_product = multiply_gradients([cur_distance_from_mean_2,
-                                        cur_distance_from_new_mean])
-    # C_n = C_n-1 + (x_n - x_mean_n) * (y_n - y_mean_n-1)
-    decoder.codist_mean = sum_gradients([decoder.codist_mean,
-                                         means_product])
-    # Cov = C_n/n
-    decoder.covariance = scale_gradients(decoder.codist_mean,
-                                         1. / (tf.cast(
-                                             decoder.step, tf.float32) + 1))
-
-    # scaling a = cov(f,h)/var(h)
-    # for each component of the gradient
-    scaling = divide_gradients(decoder.covariance, decoder.score_fun_variance)
-
-    # scale score function
-    # score_fun*-reward + score_fun*a
-    scaled_score_fun = multiply_gradients([score_fun, scaling])
-    full_grad = sum_gradients([rewarded_score_fun, scaled_score_fun])
-    return BanditObjective(
-        name="{} - expected_loss".format(decoder.name),
-        decoder=decoder,
-        samples=sample_ids,
-        sample_logprobs=sample_logprobs,
-        loss=tf.reduce_mean(tf.mul(tf.exp(sample_logprobs), -decoder.rewards),
-                            [0, 1]),
-        gradients=full_grad
-    )
-
 
 def cross_entropy_objective(decoder, optimizer, initial_temperature, clip_prob,
                             factor) -> BanditObjective:
@@ -363,13 +270,8 @@ class ExpectedLossTrainer(GenericBanditTrainer):
         initial_temperature = initial_temperature
         self.store_gradients = store_gradients
         if score_function:
-            # score function control variate
-            objective = expected_loss_objective_with_scorefun(decoders[0],
-                                                              optimizer)
-            if baseline:
-                raise NotImplementedError(
-                    "Score function and baseline control variate not "
-                    "both usable for EL objective")
+            raise NotImplementedError(
+                "Score function control variate not implemented.")
         else:
             objective = expected_loss_objective(decoders[0], optimizer,
                                                 initial_temperature)

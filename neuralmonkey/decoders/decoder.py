@@ -96,16 +96,6 @@ class Decoder(ModelPart):
         self._rnn_cell = rnn_cell
         self.temperature = temperature
 
-        # helper variables
-        # variance of score function
-        self.score_fun_variance = init_grad()
-        self.score_fun_mean = init_grad()
-        self.dist_mean = init_grad()
-        self.codist_mean = init_grad()
-        self.rewarded_score_fun_mean = init_grad()
-        # covariance of score function and gradient
-        self.covariance = init_grad()
-
         if self.embedding_size is None and self.embeddings_encoder is None:
             raise ValueError("You must specify either embedding size or the "
                              "encoder from which to reuse the embeddings ("
@@ -235,20 +225,6 @@ class Decoder(ModelPart):
 
             self.epoch = tf.placeholder(tf.int32, [], name="epoch")
             self.step = tf.placeholder(tf.int32, [], name="step")
-
-            # summaries
-            tf.scalar_summary('train_loss_with_gt_intpus',
-                              self.train_loss,
-                              collections=["summary_train"])
-
-            tf.scalar_summary('train_loss_with_decoded_inputs',
-                              self.runtime_loss,
-                              collections=["summary_train"])
-
-            tf.scalar_summary('train_optimization_cost', self.cost,
-                              collections=["summary_train"])
-
-            self._visualize_attention()
 
             log("Decoder initalized.")
 
