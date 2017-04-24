@@ -1,43 +1,42 @@
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple
 import re
 
 import tensorflow as tf
-from neuralmonkey.logging import log
-
-import numpy as np
-
 
 from neuralmonkey.runners.base_runner import (collect_encoders,
                                               BanditExecutable,
                                               BanditExecutionResult,
                                               NextExecute)
+from neuralmonkey.gradient_utils import Gradients, sum_gradients, get_gradients
 
 # tests: lint, mypy
 
 # pylint: disable=invalid-name
-Gradients = List[Tuple[tf.Tensor, tf.Variable]]
 BanditObjective = NamedTuple('BanditObjective',
-                       [('name', str),
-                        ('decoder', Any),
-                        ('samples', Any),  # TODO better type
-                        ('sample_logprobs', Any),
-                        ('loss', Any),
-                        ('gradients', Any)])
+                             [('name', str),
+                              ('decoder', Any),
+                              ('samples', Any),  # TODO better type
+                              ('sample_logprobs', Any),
+                              ('loss', Any),
+                              ('gradients', Any)])
 
 BIAS_REGEX = re.compile(r'[Bb]ias')
 
 
 # pylint: disable=too-few-public-methods,too-many-locals
 class GenericBanditTrainer(object):
-
     # only one objective for now
 
     def __init__(self, objective: BanditObjective, evaluator,
                  l1_weight=0.0, l2_weight=0.0,
                  clip_norm=False, optimizer=None, pairwise=False,
-                 binary_feedback=False, number_of_samples=1, store_gradients=False,
-                 baseline=False)\
+                 binary_feedback=False, number_of_samples=1,
+                 store_gradients=False,
+                 baseline=False) \
             -> None:
+
+        if number_of_samples > 1:
+            raise NotImplementedError("Multiple samples not implemented.")
 
         with tf.name_scope("trainer"):
 
@@ -72,15 +71,16 @@ class GenericBanditTrainer(object):
 
             # compute and apply gradients
             self.gradients = self.objective.gradients
-            self.reg_gradients = self._get_gradients(self.regularizer_cost)
+            self.reg_gradients = get_gradients(self.optimizer,
+                                               self.regularizer_cost)
             self.all_gradients = \
-                _sum_gradients([self.gradients, self.reg_gradients])
+                sum_gradients([self.gradients, self.reg_gradients])
 
             if clip_norm:
                 assert clip_norm > 0.0
                 self.all_gradients = [(tf.clip_by_norm(grad, clip_norm), var)
-                             for grad, var in self.all_gradients
-                             if grad is not None]
+                                      for grad, var in self.all_gradients
+                                      if grad is not None]
 
             self.all_coders = set.union(
                 collect_encoders(self.objective.decoder))
@@ -104,8 +104,6 @@ class GenericBanditTrainer(object):
                     tf.histogram_summary('gr_' + var.name, grad,
                                          collections=["summary_gradients"])
 
-
-
             if store_gradients:
                 # prepare stochastic gradients to be fetched them from the graph
                 # sort gradients by variable name
@@ -120,13 +118,15 @@ class GenericBanditTrainer(object):
 
                     if isinstance(optimizer, tf.train.AdamOptimizer):
                         lr_t = optimizer._lr
-                        m_t = optimizer._beta1 * optimizer.get_slot(var, "m") + \
-                              (1-optimizer._beta1) * grad
-                        v_t = optimizer._beta2 * optimizer.get_slot(var, "v") + \
-                              (1-optimizer._beta2) * (grad*grad)
-                        var_update = - lr_t * m_t / (tf.sqrt(v_t) + optimizer._epsilon)
+                        m_t = optimizer._beta1 * optimizer.get_slot(var, "m") \
+                              + (1 - optimizer._beta1) * grad
+                        v_t = optimizer._beta2 * optimizer.get_slot(var, "v") \
+                              + (1 - optimizer._beta2) * (grad * grad)
+                        var_update = - lr_t * m_t / \
+                                     (tf.sqrt(v_t) + optimizer._epsilon)
 
-                    elif isinstance(optimizer, tf.train.GradientDescentOptimizer):
+                    elif isinstance(optimizer,
+                                    tf.train.GradientDescentOptimizer):
                         lr_t = optimizer._learning_rate
                         var_update = - lr_t * grad
 
@@ -142,7 +142,7 @@ class GenericBanditTrainer(object):
                             "Gradient tracking notimplemented for {}".format(
                                 optimizer))
 
-                    flattened_gradients.append(tf.reshape(grad,[-1]))
+                    flattened_gradients.append(tf.reshape(grad, [-1]))
                     flattened_updates.append(tf.reshape(var_update, [-1]))
 
                 self.concatenated_gradients = tf.concat(0, flattened_gradients)
@@ -153,20 +153,18 @@ class GenericBanditTrainer(object):
             self.scalar_summaries = tf.merge_summary(
                 tf.get_collection("summary_train"))
 
-    def _get_gradients(self, tensor: tf.Tensor) -> Gradients:
-        gradient_list = self.optimizer.compute_gradients(
-            tensor, tf.trainable_variables(), aggregation_method=tf.AggregationMethod.EXPERIMENTAL_ACCUMULATE_N)
-        return gradient_list
-
     # pylint: disable=unused-argument
-    def get_executable(self, update=False, summaries=True, store_gradients=False) \
+    def get_executable(self, update=False, summaries=True,
+                       store_gradients=False) \
             -> BanditExecutable:
-        outputs = [self.concatenated_gradients, self.concatenated_updates] if store_gradients else []
+        outputs = [self.concatenated_gradients,
+                   self.concatenated_updates] if store_gradients else []
         if update:
             return UpdateBanditExecutable(self.all_coders,
                                           [self.objective.decoder.rewards,
                                            self.objective.decoder.baseline],
-                                          [self.objective.decoder.epoch, self.objective.decoder.step],
+                                          [self.objective.decoder.epoch,
+                                           self.objective.decoder.step],
                                           self.dummy, self.loss,
                                           outputs,
                                           self.scalar_summaries
@@ -182,73 +180,11 @@ class GenericBanditTrainer(object):
                                           None,  # no summaries yet
                                           None)
 
-def _add_to_gradients(gradients: Gradients, scalar: tf.float32) -> Gradients:
-    sum_dict = {}
-    for tensor, var in gradients:
-        sum_dict[var] = tensor+scalar
-    return [(tensor, var) for var, tensor in sum_dict.items()]
-
-def _sum_gradients(gradients_list: List[Gradients]) -> Gradients:
-    summed_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
-    for gradients in gradients_list:
-        for tensor, var in gradients:
-            if tensor is not None:
-                if not var in summed_dict:
-                    summed_dict[var] = tensor
-                else:
-                    summed_dict[var] += tensor
-    return [(tensor, var) for var, tensor in summed_dict.items()]
-
-def _multiply_gradients(gradients_list: List[Gradients]) -> Gradients:
-    product_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
-    for gradients in gradients_list:
-        for tensor, var in gradients:
-            if tensor is not None:
-                if not var in product_dict:
-                    product_dict[var] = tensor
-                else:
-                    product_dict[var] *= tensor
-    return [(tensor, var) for var, tensor in product_dict.items()]
-
-def _subtract_gradients(x: Gradients, y: Gradients) -> Gradients:
-    subtract_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
-    for tensor, var in x:
-        subtract_dict[var] = tensor
-    for tensor, var in y:
-        subtract_dict[var] -= tensor
-    return [(tensor, var) for var, tensor in subtract_dict.items()]
-
-def _scale_gradients(gradients: [Gradients], scalar) -> Gradients:
-    scaled_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
-    for tensor, var in gradients:
-        if tensor is not None:
-            scaled_dict[var] = tensor*scalar
-    return [(tensor, var) for var, tensor in scaled_dict.items()]
-
-def _divide_gradients(x: Gradients, y: Gradients) -> Gradients:
-    """ Divide the components of x by the components of y """
-    divide_dict = {}  # type: Dict[tf.Variable, tf.Tensor]
-    for tensor, var in x:
-        divide_dict[var] = tensor
-    for tensor, var in y:
-        divide_dict[var] -= tensor
-    return [(tensor, var) for var, tensor in divide_dict.items()]
-
-
-def _clip_probs(probs, prob_threshold):
-    """ Clip probabilities to some threshold """
-    if prob_threshold > 0.00:
-        log("Clipping probs <= {}".format(prob_threshold))
-        return tf.clip_by_value(probs, clip_value_min=prob_threshold,
-                            clip_value_max=1)
-    else:
-        return probs
-
 
 class UpdateBanditExecutable(BanditExecutable):
-
     def __init__(self, all_coders, reward_placeholder, epoch_placeholder,
-                 update_op, loss, gradient, scalar_summaries, histogram_summaries, store_gradients):
+                 update_op, loss, gradient, scalar_summaries,
+                 histogram_summaries, store_gradients):
         self.all_coders = all_coders
         self.reward_placeholder, self.baseline_placeholder = reward_placeholder
         self.epoch_placeholder, self.step_placeholder = epoch_placeholder
@@ -261,7 +197,8 @@ class UpdateBanditExecutable(BanditExecutable):
 
         self.result = None
 
-    def next_to_execute(self, reward: List[float], baseline: float, epoch: int, step: int) -> NextExecute:
+    def next_to_execute(self, reward: List[float], baseline: float, epoch: int,
+                        step: int) -> NextExecute:
         fetches = {'update_op': self.update_op}
         if self.scalar_summaries is not None:
             fetches['scalar_summaries'] = self.scalar_summaries
@@ -307,8 +244,8 @@ class UpdateBanditExecutable(BanditExecutable):
         # reward feed is in additional feed dict
         return feeds
 
-class SampleBanditExecutable(BanditExecutable):
 
+class SampleBanditExecutable(BanditExecutable):
     def __init__(self, all_coders, sample_op, greedy_op, regularization_cost,
                  scalar_summaries, histogram_summaries):
         self.all_coders = all_coders
@@ -319,7 +256,8 @@ class SampleBanditExecutable(BanditExecutable):
         self.regularization_cost = regularization_cost
         self.result = None
 
-    def next_to_execute(self, reward=None, baseline=None, epoch=None, step=None) -> NextExecute:
+    def next_to_execute(self, reward=None, baseline=None, epoch=None,
+                        step=None) -> NextExecute:
         fetches = {'sample_op': self.sample_op}
         fetches["greedy_op"] = self.greedy_op
         if self.scalar_summaries is not None:
@@ -337,11 +275,12 @@ class SampleBanditExecutable(BanditExecutable):
             scalar_summaries = results[0]['scalar_summaries']
             histogram_summaries = results[0]['histogram_summaries']
 
-        sampled_outputs, sampled_logprobs, neg_sample_ix = results[0]['sample_op']
+        sampled_outputs, sampled_logprobs, neg_sample_ix = results[0][
+            'sample_op']
         greedy_outputs = results[0]['greedy_op']
         reg_cost = results[0]['reg_cost']
-        outputs = sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost, neg_sample_ix
-        # TODO make summaries for these values
+        outputs = sampled_outputs, greedy_outputs, sampled_logprobs, \
+                  reg_cost, neg_sample_ix
         self.result = BanditExecutionResult(
             [outputs], loss=None,
             scalar_summaries=scalar_summaries,

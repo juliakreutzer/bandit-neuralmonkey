@@ -1,12 +1,12 @@
 # tests: lint
 
-from typing import cast, Iterable, List, Callable, Optional, Union, Any, \
-    Tuple, Dict
+from typing import cast, Iterable, List, Callable, Optional, Union, Any, Tuple, Dict
 import math
 
 import tensorflow as tf
 import numpy as np
 
+from neuralmonkey.nn.ortho_gru_cell import OrthoGRUCell
 from neuralmonkey.dataset import Dataset
 from neuralmonkey.vocabulary import Vocabulary, START_TOKEN
 from neuralmonkey.model.model_part import ModelPart, FeedDict
@@ -17,7 +17,6 @@ from neuralmonkey.nn.projection import linear
 from neuralmonkey.decoders.encoder_projection import (
     linear_encoder_projection, concat_encoder_projection, empty_initial_state)
 from neuralmonkey.decoders.output_projection import no_deep_output
-from neuralmonkey.gradient_utils import init_grad
 
 
 # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -37,22 +36,20 @@ class Decoder(ModelPart):
                  name: str,
                  max_output_len: int,
                  dropout_keep_prob: float,
-                 rnn_size: Optional[int] = None,
-                 embedding_size: Optional[int] = None,
+                 rnn_size: Optional[int]=None,
+                 embedding_size: Optional[int]=None,
                  output_projection: Optional[Callable[
-                     [tf.Tensor, tf.Tensor,
-                      List[tf.Tensor]], tf.Tensor]] = None,
-                 encoder_projection: Optional[
-                     Callable[[tf.Tensor, Optional[int], Optional[List[Any]]],
-                              tf.Tensor]] = None,
-                 use_attention: bool = False,
-                 embeddings_encoder: Optional[Any] = None,
-                 rnn_cell: str = 'GRU',
-                 attention_on_input: bool = True,
-                 save_checkpoint: Optional[str] = None,
-                 load_checkpoint: Optional[str] = None,
-                 sample_size=1,
-                 temperature=1.0) -> None:
+                     [tf.Tensor, tf.Tensor, List[tf.Tensor]], tf.Tensor]]=None,
+                 encoder_projection: Optional[Callable[
+                     [tf.Tensor, Optional[int], Optional[List[Any]]],
+                     tf.Tensor]]=None,
+                 use_attention: bool=False,
+                 embeddings_encoder: Optional[Any]=None,
+                 rnn_cell: str='GRU',
+                 attention_on_input: bool=True,
+                 save_checkpoint: Optional[str]=None,
+                 load_checkpoint: Optional[str]=None,
+                 sample_size = 1) -> None:
         """Create a refactored version of monster decoder.
 
         Arguments:
@@ -91,20 +88,8 @@ class Decoder(ModelPart):
         self.output_projection = output_projection
         self.encoder_projection = encoder_projection
         self.use_attention = use_attention
-        self.attention_on_input = attention_on_input
         self.embeddings_encoder = embeddings_encoder
         self._rnn_cell = rnn_cell
-        self.temperature = temperature
-
-        # helper variables
-        # variance of score function
-        self.score_fun_variance = init_grad()
-        self.score_fun_mean = init_grad()
-        self.dist_mean = init_grad()
-        self.codist_mean = init_grad()
-        self.rewarded_score_fun_mean = init_grad()
-        # covariance of score function and gradient
-        self.covariance = init_grad()
 
         if self.embedding_size is None and self.embeddings_encoder is None:
             raise ValueError("You must specify either embedding size or the "
@@ -163,9 +148,9 @@ class Decoder(ModelPart):
             embedded_train_inputs = self._embed_and_dropout(
                 self.train_inputs[:-1])
 
-            # attention has done dropout
-            self.embedded_go_symbols = tf.nn.embedding_lookup(
-                self.embedding_matrix, self.go_symbols)
+            # attention has done(?) dropout
+            embedded_go_symbols = tf.nn.embedding_lookup(self.embedding_matrix,
+                                                     self.go_symbols)
 
             # fetch train attention objects
             self._train_attention_objects = {}
@@ -177,13 +162,12 @@ class Decoder(ModelPart):
                         for e in self.encoders
                         if isinstance(e, Attentive)}
 
-            # decoding with training target word inputs
-            _, _, _, _, self.train_logits, _ = self.attention_decoder(
-                self.embedded_go_symbols,
-                attention_on_input=self.attention_on_input,
+            self.train_rnn_outputs, _, _, _, self.train_logits = \
+                self._attention_decoder(
+                embedded_go_symbols,
+                attention_on_input=attention_on_input,
                 train_inputs=embedded_train_inputs,
-                train_mode=True,
-                temperature=self.temperature, store_logits=True)
+                train_mode=True)
 
             assert not tf.get_variable_scope().reuse
             tf.get_variable_scope().reuse_variables()
@@ -197,44 +181,72 @@ class Decoder(ModelPart):
                     for e in self.encoders
                     if isinstance(e, Attentive)}
 
-            # decoding during inference: without target word inputs
-            self.runtime_rnn_outputs, self.runtime_rnn_states, decoded_ids, \
-            self.decoded_logprobs, self.runtime_logits, _ = \
-                self.attention_decoder(
-                    self.embedded_go_symbols,
-                    attention_on_input=attention_on_input,
-                    train_mode=False,
-                    sample_mode=0,
-                    temperature=self.temperature, store_logits=True,
-                    store_rnn_outputs=True, store_rnn_states=True)
+            (self.runtime_rnn_outputs,
+             self.runtime_rnn_states, self.decoded, self.decoded_logprobs, self.runtime_logits) = \
+                self._attention_decoder(
+                 embedded_go_symbols,
+                 attention_on_input=attention_on_input,
+                 train_mode=False,
+                 sample_mode=0)
 
-            self.decoded = tf.expand_dims(tf.pack(decoded_ids), 2)
-
-            # xent loss
             train_targets = tf.unpack(self.train_inputs)
+
+            self.train_loss = tf.nn.seq2seq.sequence_loss(
+                self.train_logits, train_targets,
+                tf.unpack(self.train_padding), len(self.vocabulary))
+            self.cost = self.train_loss
 
             self.train_logprobs = [tf.nn.log_softmax(l)
                                    for l in self.train_logits]
 
-            self.train_loss = tf.nn.seq2seq.sequence_loss(
-                self.train_logits, train_targets,
-                tf.unpack(self.train_padding))
-            self.cost = self.train_loss
-
             self.runtime_loss = tf.nn.seq2seq.sequence_loss(
                 self.runtime_logits, train_targets,
-                tf.unpack(self.train_padding))
+                tf.unpack(self.train_padding), len(self.vocabulary))
+
+            self.runtime_logprobs = [tf.nn.log_softmax(l)
+                                     for l in self.runtime_logits]
 
             # sampling
             self.sample_size = sample_size
 
             self.rewards = tf.placeholder(tf.float32, [None, self.sample_size],
                                           name="rewards")
-            self.baseline = tf.placeholder(tf.float32, [],
-                                           name="baseline")  # scalar
-
             self.epoch = tf.placeholder(tf.int32, [], name="epoch")
-            self.step = tf.placeholder(tf.int32, [], name="step")
+
+            (sample_rnn_outputs,
+             sample_rnn_states, sample_ids, sample_logprobs_time,
+             sample_logits) = \
+                self._attention_decoder(
+                    embedded_go_symbols,
+                    attention_on_input=attention_on_input,
+                    train_mode=False,
+                    sample_mode=self.sample_size)
+
+            # TODO expand dim is only for now when sample size is 1
+            self.sample_ids = tf.expand_dims(tf.pack(sample_ids), 2)  # time x batch x sample_size
+            sample_logprobs_time_packed = tf.pack(sample_logprobs_time)  # time x batch x sample_size
+            self.sample_logprobs = tf.reduce_sum(sample_logprobs_time_packed, [0])  # batch x sample_size for full sequence
+            self.sample_probs = tf.exp(self.sample_logprobs)  # batch_size x sample_size
+
+            # second sample, needed for pairwise bandit objectives
+            (sample_rnn_outputs_2,
+             sample_rnn_states_2, sample_ids_2, sample_logprobs_time_2,
+             sample_logits_2) = \
+                self._attention_decoder(
+                    embedded_go_symbols,
+                    attention_on_input=attention_on_input,
+                    train_mode=False,
+                    sample_mode=-self.sample_size)
+
+            # TODO expand dim is only for now when sample size is 1
+            self.sample_ids_2 = tf.expand_dims(tf.pack(sample_ids_2), 2)  # time x batch x sample_size
+            sample_logprobs_time_2 = tf.pack(sample_logprobs_time_2)  # time x batch x sample_size
+            self.sample_logprobs_2 = tf.reduce_sum(sample_logprobs_time_2, [0])  # batch x sample_size for full sequence
+            self.sample_probs_2 = tf.exp(self.sample_logprobs)  # batch_size x sample_size
+
+            # pairs of samples
+            self.pair_logprobs = self.sample_logprobs + self.sample_logprobs_2
+            self.pair_probs = tf.exp(self.pair_logprobs)
 
             # summaries
             tf.scalar_summary('train_loss_with_gt_intpus',
@@ -251,6 +263,90 @@ class Decoder(ModelPart):
             self._visualize_attention()
 
             log("Decoder initalized.")
+
+    def sample_batch(self, neg=False, sample_size=1):
+        """
+        Sample a target words for the full batch and return its ids and
+        log probabilities
+        :param neg: whether to sample from negative model distribution
+        :return:
+        """
+        sample_ids = []
+        sample_logprobs = []
+
+        model_logprob = self.runtime_logits
+
+        # sampling from negative weights of last layer
+        if neg:
+
+            # version 1: negating all logits
+            # temps = [-1 for l in self.runtime_logits]
+
+            # version 2: negating all logits randomly
+            #temps = [tf.sign(tf.random_uniform((1,), -1, 1))
+            #         for l in self.runtime_logits]
+
+            # version 3: negating logits only for first word
+            #temps = [1 for l in self.runtime_logits]
+            #temps[0] = -1
+
+            # version 4: negating logits only for one word, chosen randomly
+            ix = tf.random_uniform((1,), 0, len(self.runtime_logits), tf.int32)
+            ixtemp = tf.one_hot(ix, len(self.runtime_logits), on_value=-1., off_value=1.)
+            temps = tf.unpack(ixtemp, axis=1)
+
+            # version 5: sample (positive) temperature for every word
+            #temps = tf.unpack(tf.random_uniform((len(self.runtime_logits),),
+            #                                   0.01, 1.01, tf.float32))
+
+            model_logprob = [l/n for l,n in zip(self.runtime_logits, temps)]
+
+            # version 6: all the same as first sample
+            #model_logprob = self.runtime_logits
+
+        # TODO version 7: sample once with high temp (1,-> like sample, explore), one with low (0.01, -> like greedy, exploit)
+        #else:
+        #    temps = [0.01 for l in self.runtime_logits]
+        #    model_logprob = model_logprob = [l/n for l,n in zip(self.runtime_logits, temps)]
+
+        for p in model_logprob:  # time steps
+
+            # with gather_nd
+            # FIXME no gradients implemented yet in tf version 0.11
+            #sample_id = tf.squeeze(tf.cast(tf.multinomial(p, 1), tf.int32))
+            #batch_enum = tf.range(tf.shape(sample_id)[0])
+            #indices = tf.pack([batch_enum, sample_id], 1)
+            #sample_logprob = tf.gather_nd(p, indices)
+            #sample_ids.append(sample_id)
+            #sample_logprobs.append(sample_logprob)
+
+            # with gather and flattening
+            sample_id = tf.cast(tf.multinomial(p, sample_size), tf.int32)  # batch_size x 1
+            flat_p = tf.reshape(p, [-1])  # batch_size*vocab_size
+            batch_size = tf.shape(sample_id)[0]
+            # add correction to indices because of flattening
+            to_add = tf.reshape(tf.range(0, batch_size * len(self.vocabulary),
+                              len(self.vocabulary)), [batch_size, -1])
+            indices = sample_id + to_add
+            sample_logprob = tf.gather(flat_p, indices)  # batch_size x 1
+            sample_ids.append(sample_id)
+            sample_logprobs.append(sample_logprob)
+
+        return sample_logprobs, sample_ids
+
+    def sample_singleton(self, k, n):
+        """ Sample k target words for a single instance.
+        Return word indices and their log probabilities from the softmax
+        distribution
+
+        Arguments:
+            k: How many outputs to sample
+        """
+        sample_ids = tf.cast(tf.multinomial(self.runtime_logprobs[n], k),
+                             tf.int32)
+        sample_logprobs = tf.gather_nd(self.runtime_logprobs[n][0],
+                                       sample_ids[0])  # non batch
+        return sample_logprobs, tf.squeeze(sample_ids[0])
 
     def _create_input_placeholders(self) -> None:
         """Creates input placeholder nodes in the computation graph"""
@@ -326,9 +422,9 @@ class Decoder(ModelPart):
                            self.dropout_keep_prob,
                            self.train_mode)
 
-    def _logit_function(self, state: tf.Tensor, factor=1.0) -> tf.Tensor:
+    def _logit_function(self, state: tf.Tensor) -> tf.Tensor:
         state = dropout(state, self.dropout_keep_prob, self.train_mode)
-        return tf.matmul(state, factor * self.decoding_w) + self.decoding_b
+        return tf.matmul(state, self.decoding_w) + self.decoding_b
 
     def _get_rnn_cell(self) -> tf.nn.rnn_cell.RNNCell:
         if self._rnn_cell == 'GRU':
@@ -344,62 +440,16 @@ class Decoder(ModelPart):
         else:
             return self._runtime_attention_objects.get(encoder)
 
-    def sample_from_runtime_logits(self, neg=False):
-        """Sample from the runtime hidden states"""
-        sample_size = 1  # for now
-        voc_size = len(self.vocabulary)
-
-        sample_ids = []
-        sample_logprob = 0.0
-
-        model_logprob = self.runtime_logits
-
-        # sampling from negative weights of last layer
-        ix = tf.constant(-1)
-        if neg:
-            # negating logits only for one word, chosen randomly
-            ix = tf.random_uniform((1,), 0, len(self.runtime_logits),
-                                   tf.int32)
-            ixtemp = tf.one_hot(ix, len(self.runtime_logits), on_value=-1.,
-                                off_value=1.)
-            temps = tf.unpack(ixtemp, axis=1)
-
-            model_logprob = [l / t for l, t in
-                             zip(self.runtime_logits, temps)]
-
-        for p in model_logprob:  # time steps
-
-            # with gather and flattening
-            sample_id = tf.stop_gradient(tf.cast(tf.multinomial(p, sample_size),
-                                                 tf.int32))  # batch_size x 1
-            sample_id = tf.squeeze(sample_id, [1])  # batch_size
-
-            # use dynamic partition to get the logprobs of the samples
-            partitions = tf.one_hot(sample_id, voc_size, dtype=tf.int32)
-            sample_logprob_word = \
-                tf.dynamic_partition(p, partitions=partitions,
-                                     num_partitions=2)[1]
-
-            sample_ids.append(sample_id)
-            sample_logprob += sample_logprob_word
-
-        return tf.pack(sample_ids), sample_logprob, ix
-
     # pylint: disable=too-many-branches
-    def attention_decoder(
+    def _attention_decoder(
             self,
             go_symbols: tf.Tensor,
-            train_inputs: tf.Tensor = None,
+            train_inputs: tf.Tensor=None,
             attention_on_input=True,
-            train_mode: bool = False,
-            scope: Union[str, tf.VariableScope] = None,
-            sample_mode: int = 0,
-            temperature: float = 1.0,
-            store_logits: bool = False,
-            store_rnn_outputs: bool = False,
-            store_rnn_states: bool = False) -> Tuple[
-        List[tf.Tensor], List[tf.Tensor], List[tf.Tensor],
-        List[tf.Tensor], List[tf.Tensor], tf.Tensor]:
+            train_mode: bool=False,
+            scope: Union[str, tf.VariableScope]=None,
+            sample_mode: int=0) -> Tuple[
+                List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor], List[tf.Tensor]]:
         """Run the decoder RNN.
 
         Arguments:
@@ -414,10 +464,6 @@ class Decoder(ModelPart):
             scope: Variable scope to use
             sample_mode: -k: sampling k times from negative logits,
                 k: sampling k times from logits, 0: greedy
-            temperature: softmax temperature for sampling
-            store_rnn_outputs: whether to return the RNN outputs from every step
-            store_rnn_states: whether to return the RNN states from every step
-            store_logits: whether to return the logits from every step
         """
         att_objects = [self.get_attention_object(e, train_mode)
                        for e in self.encoders]
@@ -425,12 +471,17 @@ class Decoder(ModelPart):
 
         cell = self._get_rnn_cell()
 
-        unk_id = self.vocabulary.get_unk_id()
+        if sample_mode == 0:
+            log("Greedy decoding")
+        elif sample_mode > 0:
+            log("Sampling k={} from logits".format(sample_mode))
+        elif sample_mode < 0:
+            log("Sampling k={} from negated logits".format(-sample_mode))
 
         outputs = []
         states = []
         predictions = []
-        logprob_predicted = 0
+        logprobs_predicted = []
         logits = []
 
         with tf.variable_scope(scope or "attention_decoder"):
@@ -449,21 +500,7 @@ class Decoder(ModelPart):
             attns = [tf.zeros([self.batch_size, a.attn_size])
                      for a in att_objects]
 
-            # sample index to take negative logits for sampling
-            ix = tf.random_uniform((1,), 1, self.max_output_len + 1, tf.int32)
-
-            # modify temperature for this index for negative sampling
-            if sample_mode < 0:
-                ixtemp = tf.one_hot(ix, self.max_output_len + 1,
-                                    on_value=-temperature,
-                                    off_value=temperature)
-                temps = tf.unpack(ixtemp, axis=1)
-            else:
-                temps = [1.0] * (self.max_output_len + 1)
-
-            voc_size = len(self.vocabulary)
-
-            for i, temp in zip(range(self.max_output_len + 1), temps):
+            for i in range(self.max_output_len+1):
                 if i > 0:
                     tf.get_variable_scope().reuse_variables()
 
@@ -474,70 +511,51 @@ class Decoder(ModelPart):
                 elif train_mode:
                     if i < self.max_output_len:
                         inp = train_inputs[i - 1]
-                        out_activation = self._logit_function(prev, factor=temp)
-                        if store_logits:
-                            logits.append(out_activation)
-                    else:
-                        out_activation = self._logit_function(prev, factor=temp)
-                        if store_logits:
-                            logits.append(out_activation)
+                    else:  # we need one less input for train_mode
                         break
                 else:
                     # during runtime find index for output word by:
-                    # 1) greedy decoding (i.e. taking the argmax of logits)
-                    # 2) sampling, either from positive or negative logits
+                        # 1) greedy decoding (i.e. taking the argmax of the logits)
+                        # 2) sampling, either from positive or negative logits
                     with tf.variable_scope("loop_function", reuse=True):
 
-                        out_activation = self._logit_function(prev, factor=temp)
-                        if store_logits:
-                            logits.append(out_activation)
+                        out_activation = self._logit_function(prev)
+                        print(out_activation)
+                        batch_size = tf.shape(out_activation)[0]
+                        logits.append(out_activation)
 
                         if sample_mode == 0:
                             # greedy
-                            prev_word_index = tf.cast(tf.argmax(out_activation,
-                                                                1), tf.int32)
+                            prev_word_index = tf.cast(tf.argmax(out_activation, 1), tf.int32)
+                            flat_p = tf.reshape(out_activation, [-1])
 
                         else:
-                            # sampling
-                            out_activation = out_activation  # /temp
-                            prev_word_index = tf.stop_gradient(tf.cast(
-                                tf.multinomial(out_activation, 1),
-                                tf.int32))  # batch_size x sample_size
+                            if sample_mode > 0:
+                                # from positive logits
+                                prev_word_index = tf.cast(tf.multinomial(out_activation, sample_mode),
+                                                    tf.int32)  # batch_size x sample_size
+                                flat_p = tf.reshape(out_activation, [-1])
+
+                            elif sample_mode < 0:
+                                # from negative logits
+                                # TODO make more sophisticated
+                                prev_word_index = tf.cast(tf.multinomial(-out_activation, -sample_mode),
+                                                    tf.int32) # batch_size x sample_size
+                                flat_p = tf.reshape(-out_activation, [-1])
+
+                            to_add = tf.reshape(
+                                tf.range(0, batch_size * len(self.vocabulary),
+                                         len(self.vocabulary)),
+                                [batch_size, -1])
+                            print("prev {}".format(prev_word_index))
+                            print(to_add)
+                            indices = prev_word_index + to_add
+                            sample_logprob = tf.gather(flat_p, indices) # batch_size x sample_size
+                            logprobs_predicted.append(sample_logprob)
                             prev_word_index = tf.squeeze(prev_word_index, [1])
 
-                        # use dynamic partition to get the logprobs of the
-                        # samples
-                        partitions = tf.one_hot(prev_word_index, voc_size,
-                                                dtype=tf.int32)
-                        sample_logprob_word = tf.dynamic_partition(
-                            out_activation, partitions=partitions,
-                            num_partitions=2)[1]
-
-                        # compute log probabilities from logits
-                        z = tf.reduce_logsumexp(out_activation, [1])
-                        sample_logprob_word_normalized = sample_logprob_word - z
-                        logprob_predicted += sample_logprob_word_normalized
-
                         inp = self._embed_and_dropout(prev_word_index)
-
-                        # if predicted word is UNK, replace with negative index
-                        # of maximally aligned source word
-                        def replace_unk(token_id):
-                            i, j = tf.unpack(token_id)
-                            return tf.cond(tf.equal(i, unk_id), lambda: (-j),
-                                           lambda: i)
-
-                        attns_time = [a.attentions_in_time[-1] for
-                                      a in att_objects]
-                        argmax_attention = tf.cast(tf.argmax(attns_time[0], 1),
-                                                   tf.int32)
-                        symb_and_att = tf.pack([prev_word_index,
-                                                argmax_attention], 1)
-                        unk_replaced = tf.map_fn(lambda token_id:
-                                                 replace_unk(token_id),
-                                                 symb_and_att)
-
-                        predictions.append(unk_replaced)
+                        predictions.append(prev_word_index)
 
                 if abs(sample_mode) <= 1:
 
@@ -550,9 +568,7 @@ class Decoder(ModelPart):
                     # Run the RNN.
 
                     cell_output, state = cell(x, state)
-                    if store_rnn_states:
-                        states.append(state)
-
+                    states.append(state)
                     # Run the attention mechanism.
 
                     attns = [a.attention(cell_output) for a in att_objects]
@@ -570,11 +586,9 @@ class Decoder(ModelPart):
                         "Multiple samples are not implemented yet")
 
                 prev = output
+                outputs.append(output)
 
-                if store_rnn_outputs:
-                    outputs.append(output)
-
-        return outputs, states, predictions, logprob_predicted, logits, ix - 1
+        return outputs, states, predictions, logprobs_predicted, logits
 
     def _visualize_attention(self, neg=False):
         """Create image summaries with attentions"""
@@ -589,7 +603,7 @@ class Decoder(ModelPart):
                 collections=["summary_val_plots"],
                 max_images=256)
 
-    def feed_dict(self, dataset: Dataset, train: bool = False) -> FeedDict:
+    def feed_dict(self, dataset: Dataset, train: bool=False) -> FeedDict:
         """Populate the feed dictionary for the decoder object
 
         Arguments:
@@ -605,7 +619,8 @@ class Decoder(ModelPart):
 
         sentences_list = list(sentences) if sentences is not None else None
 
-        fd = {self.train_mode: train}  # type: FeedDict
+        fd = {}  # type: FeedDict
+        fd[self.train_mode] = train
 
         go_symbol_idx = self.vocabulary.get_word_index(START_TOKEN)
         fd[self.go_symbols] = np.full([1, len(dataset)], go_symbol_idx,
@@ -630,7 +645,6 @@ class Decoder(ModelPart):
         Get all the placeholders of the decoder
         :return:
         """
-        placeholders = [self.rewards, self.epoch, self.go_symbols,
-                        self.train_mode, self.train_inputs, self.train_padding,
-                        self.baseline, self.step]
+        placeholders = [self.rewards, self.epoch, self.go_symbols, self.train_mode,
+                        self.train_inputs, self.train_padding]
         return placeholders
