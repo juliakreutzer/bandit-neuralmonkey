@@ -302,9 +302,9 @@ class Decoder(ModelPart):
                            self.dropout_keep_prob,
                            self.train_mode)
 
-    def _logit_function(self, state: tf.Tensor, factor=1.0) -> tf.Tensor:
+    def _logit_function(self, state: tf.Tensor) -> tf.Tensor:
         state = dropout(state, self.dropout_keep_prob, self.train_mode)
-        return tf.matmul(state, factor * self.decoding_w) + self.decoding_b
+        return tf.matmul(state, self.decoding_w) + self.decoding_b
 
     def _get_rnn_cell(self) -> tf.nn.rnn_cell.RNNCell:
         if self._rnn_cell == 'GRU':
@@ -435,7 +435,7 @@ class Decoder(ModelPart):
                                     off_value=temperature)
                 temps = tf.unpack(ixtemp, axis=1)
             else:
-                temps = [1.0] * (self.max_output_len + 1)
+                temps = [temperature] * (self.max_output_len + 1)
 
             voc_size = len(self.vocabulary)
 
@@ -450,11 +450,11 @@ class Decoder(ModelPart):
                 elif train_mode:
                     if i < self.max_output_len:
                         inp = train_inputs[i - 1]
-                        out_activation = self._logit_function(prev, factor=temp)
+                        out_activation = self._logit_function(prev)
                         if store_logits:
                             logits.append(out_activation)
                     else:
-                        out_activation = self._logit_function(prev, factor=temp)
+                        out_activation = self._logit_function(prev)
                         if store_logits:
                             logits.append(out_activation)
                         break
@@ -464,7 +464,7 @@ class Decoder(ModelPart):
                     # 2) sampling, either from positive or negative logits
                     with tf.variable_scope("loop_function", reuse=True):
 
-                        out_activation = self._logit_function(prev, factor=temp)
+                        out_activation = self._logit_function(prev)
                         if store_logits:
                             logits.append(out_activation)
 
@@ -475,7 +475,8 @@ class Decoder(ModelPart):
 
                         else:
                             # sampling
-                            out_activation = out_activation  # /temp
+                            out_activation = tf.scalar_mul(1./temp,
+                                                           out_activation)
                             prev_word_index = tf.stop_gradient(tf.cast(
                                 tf.multinomial(out_activation, 1),
                                 tf.int32))  # batch_size x sample_size

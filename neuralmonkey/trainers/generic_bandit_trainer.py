@@ -176,6 +176,7 @@ class GenericBanditTrainer(object):
             return SampleBanditExecutable(self.all_coders,
                                           self.sample_op,
                                           self.greedy_op,
+                                          self.objective.decoder.step,
                                           self.regularizer_cost,
                                           None,  # no summaries yet
                                           None)
@@ -210,7 +211,7 @@ class UpdateBanditExecutable(BanditExecutable):
         # extra feed for reward
         return feedables, fetches, {self.reward_placeholder: reward,
                                     self.epoch_placeholder: epoch,
-                                    self.step_placeholder: step,
+                                    #self.step_placeholder: step,
                                     self.baseline_placeholder: baseline}
 
     def collect_results(self, results: List[Dict]) -> None:
@@ -246,7 +247,8 @@ class UpdateBanditExecutable(BanditExecutable):
 
 
 class SampleBanditExecutable(BanditExecutable):
-    def __init__(self, all_coders, sample_op, greedy_op, regularization_cost,
+    def __init__(self, all_coders, sample_op, greedy_op, step_placeholder,
+                 regularization_cost,
                  scalar_summaries, histogram_summaries):
         self.all_coders = all_coders
         self.sample_op = sample_op
@@ -254,6 +256,7 @@ class SampleBanditExecutable(BanditExecutable):
         self.scalar_summaries = scalar_summaries
         self.histogram_summaries = histogram_summaries
         self.regularization_cost = regularization_cost
+        self.step_placeholder = step_placeholder
         self.result = None
 
     def next_to_execute(self, reward=None, baseline=None, epoch=None,
@@ -265,7 +268,7 @@ class SampleBanditExecutable(BanditExecutable):
             fetches['histogram_summaries'] = self.histogram_summaries
         fetches['reg_cost'] = self.regularization_cost
 
-        return self.all_coders, fetches, {}
+        return self.all_coders, fetches, {self.step_placeholder: step}
 
     def collect_results(self, results: List[Dict]) -> None:
         if self.scalar_summaries is None:

@@ -815,7 +815,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
 
             # sample an output for the requested sentence
             sampling_result = tf_manager.execute_bandits(
-                batch_dataset, [trainer], epoch=0, step=step, # TODO fix annealing: no epochs
+                batch_dataset, [trainer], epoch=0, step=step,
                 update=False, summaries=False, rewards=None)
             sampled_outputs, greedy_outputs, sampled_logprobs, reg_cost,\
             neg_sample_index = sampling_result[0].outputs[0]
@@ -852,7 +852,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                     sample_rewards = []
                     # ids to words
                     sentences = trainer.objective.decoder.vocabulary.\
-                        vectors_to_sentences(outputs_per_sample[s]) # FIXME ugly
+                        vectors_to_sentences(outputs_per_sample[s])
 
                     if postprocess is not None:
                         sentences = postprocess(sentences)
