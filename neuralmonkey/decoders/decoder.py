@@ -477,6 +477,7 @@ class Decoder(ModelPart):
                             # sampling
                             out_activation = tf.scalar_mul(1./temp,
                                                            out_activation)
+
                             prev_word_index = tf.stop_gradient(tf.cast(
                                 tf.multinomial(out_activation, 1),
                                 tf.int32))  # batch_size x sample_size

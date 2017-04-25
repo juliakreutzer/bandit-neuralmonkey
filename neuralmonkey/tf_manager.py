@@ -243,9 +243,14 @@ class TensorFlowManager(object):
             collected_results.append(reduce_execution_results(result_list))
         return collected_results
 
-    def save(self, variable_files: Union[str, List[str]]) -> None:
+    def save(self, variable_files: Union[str, List[str]], global_step=0) \
+            -> None:
         if isinstance(variable_files, str) and len(self.sessions) == 1:
-            self.saver.save(self.sessions[0], variable_files)
+            if global_step == 0:
+                self.saver.save(self.sessions[0], variable_files)
+            else:
+                self.saver.save(self.sessions[0], variable_files,
+                                global_step=global_step)
             return
 
         if isinstance(variable_files, str):
@@ -258,7 +263,10 @@ class TensorFlowManager(object):
                     len(variable_files), len(self.sessions)))
 
         for sess, file_name in zip(self.sessions, variable_files):
-            self.saver.save(sess, file_name)
+            if global_step == 0:
+                self.saver.save(sess, file_name)
+            else:
+                self.saver.save(sess, file_name, global_step=global_step)
 
     def restore(self, variable_files: Union[str, List[str]]) -> None:
         if isinstance(variable_files, str):

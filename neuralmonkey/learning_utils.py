@@ -5,6 +5,7 @@ import os
 import numpy as np
 import tensorflow as tf
 from termcolor import colored
+import time
 
 from neuralmonkey.logging import log, log_print
 from neuralmonkey.dataset import Dataset
@@ -801,7 +802,8 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
     wmt_client_python.configuration.host = tf_manager.get_host()
     api_instance = wmt_client_python.SharedTaskApi()
 
-    api_instance.reset_dataset()
+    if initial_seen_instances == 0:
+        api_instance.reset_dataset()
 
     log("Starting training")
     reward_sum = initial_baseline * initial_seen_instances
@@ -816,13 +818,17 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
             # request the next source sentence
             wmt_sentence = None
             sentence_id = None
+            retry = 0
             while wmt_sentence is None:
                 try:
+                    waiting_time = (2 ** retry) * 0.1  # 2^retry * 100ms
+                    time.sleep(waiting_time)
                     api_response = api_instance.get_sentence()
                     wmt_sentence = api_response.source
                     sentence_id = api_response.id
                 except ApiException as e:
                     print("Exception when calling get_sentence {}".format(e))
+                    retry += 1
                     if e.status == 404:
                         print("Training ended!")
                         training = False
@@ -854,11 +860,11 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                 vectors_to_sentences(greedy_outputs)
 
             if copypostprocess is not None:
-                if preprocess is not None:
-                    inputs = batch_dataset.get_series("source")
-                    sentences_greedy = copypostprocess(inputs, sentences_greedy)
-                else:  # BPE
+                if preprocess is not None:  # BPE
                     inputs = batch_dataset.get_series("source_bpe")
+                    sentences_greedy = copypostprocess(inputs, sentences_greedy)
+                else:
+                    inputs = batch_dataset.get_series("source")
                     sentences_greedy = copypostprocess(inputs, sentences_greedy)
 
             # evaluate samples
@@ -916,15 +922,19 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                         t = wmt_client_python.Translation(
                             id=translation_id, translation=translation_str)
 
+                        retry = 0
                         while r is None:
+                            waiting_time = (2**retry)*0.1  # 2^retry * 100ms
+                            time.sleep(waiting_time)
                             try:
                                 translation_response = \
                                     api_instance.send_translation(t)
                                 r = translation_response.score
                             except ApiException as e:
                                 log_print(
-                                    "Exception when calling send_translation:"
-                                    " {}\n".format(e))
+                                    "Exception when calling send_translation "
+                                    "(retry #{}): {}\n".format(retry, e))
+                                retry += 1
 
                         sample_rewards.append(r)
 
@@ -939,10 +949,6 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                                 seen_instances, translation_str))
                             log_print("Greedy translation {}: {}".format(
                                 seen_instances, " ".join(g)))
-                            if postprocess is not None:
-                                log_print("Postprocessed {}: {}".format(
-                                    seen_instances, " ".join(
-                                        postprocess([g])[0])))
                             log_print("Score: {}".format(r))
                             log_print("Avg score: {}".format(
                                 reward_sum / float(seen_instances)))
@@ -974,7 +980,7 @@ def bandit_training_loop_wmt(tf_manager: TensorFlowManager,
                     log("Baseline {}".format(baseline))
 
             if step % save_every_n == 0:
-                tf_manager.save("{}.{}".format(vars_prefix, seen_instances))
+                tf_manager.save(vars_prefix, global_step=step)
 
     except KeyboardInterrupt:
         log("Training interrupted by user.")

@@ -4,8 +4,6 @@ import tensorflow as tf
 
 from neuralmonkey.trainers.generic_bandit_trainer import GenericBanditTrainer, \
     BanditObjective
-from neuralmonkey.gradient_utils import sum_gradients, scale_gradients, \
-    subtract_gradients, divide_gradients, multiply_gradients
 
 
 # tests; pylint,mypy
@@ -37,13 +35,19 @@ def exploit_only_objective(decoder, optimizer) -> \
     )
 
 
-def expected_loss_objective(decoder, optimizer, annealing_start=1) \
+def expected_loss_objective(decoder, optimizer, annealing_start=-1, decay=False) \
         -> BanditObjective:
     """Get expected loss objective from decoder."""
 
     # compute temperature for annealing
     # T(t) = 0.99^t where t = t-t_start if t > t_start
-    current_temp = _get_annealing_temp(annealing_start, decoder.step)
+    if annealing_start != -1:
+        current_temp = _get_annealing_temp(annealing_start, decoder.step)
+        # also anneal lr
+        if decay:
+            optimizer._lr = optimizer._lr*current_temp
+    else:
+        current_temp = 1.0
 
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False,
                                                   temp=current_temp)
@@ -75,6 +79,7 @@ def _get_annealing_temp(annealing_start, current_step):
                    lambda: 0.99**diff,
                    lambda: tf.constant(1.0))
     return temp
+
 
 def _clip_probs(probs, prob_threshold):
     """ Clip probabilities to some threshold """
@@ -133,16 +138,17 @@ class ExpectedLossTrainer(GenericBanditTrainer):
     """ EL objective with optional control variates (score function and BL) """
 
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
-                 l2_weight=0., clip_norm=False, annealing_start=1,
+                 l2_weight=0., clip_norm=False, annealing_start=-1,
                  optimizer=None, binary_feedback=False, store_gradients=False,
-                 baseline=False, score_function=False) -> None:
+                 baseline=False, score_function=False, decay=False) -> None:
         self.store_gradients = store_gradients
         if score_function:
             raise NotImplementedError(
                 "Score function control variate not implemented.")
         else:
             objective = expected_loss_objective(decoders[0], optimizer,
-                                                annealing_start=annealing_start)
+                                                annealing_start=annealing_start,
+                                                decay=decay)
         super(ExpectedLossTrainer, self).__init__(
             objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
