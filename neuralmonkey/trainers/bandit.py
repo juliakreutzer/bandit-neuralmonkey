@@ -71,6 +71,30 @@ def expected_loss_objective(decoder, optimizer, initial_temperature) \
     )
 
 
+def probit_loss_objective(decoder, optimizer) -> BanditObjective:
+    """ Probit loss """
+
+    # sample weights e from Gaussian
+    # compute w'
+    # decode under w'
+    sample_ids, sample_logprobs, sample_epsilon =_get_samples_gaussian(decoder)
+    # get feedback for sample
+    # compute gradient: learning_rate*-reward*epsilon
+    gradients = scale_gradients(sample_epsilon, tf.reduce_mean(-decoder.rewards)) # -reward*epsilon
+    # learning rate is added later when optimizer.apply_gradient is called
+    decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
+
+
+    return BanditObjective(
+        name="{} - probit_loss".format(decoder.name),
+        decoder=decoder,
+        samples=sample_ids,
+        sample_logprobs=sample_logprobs,
+        loss=tf.reduce_mean(-decoder.rewards, [0, 1]),
+        gradients=gradients
+    )
+
+
 def expected_loss_objective_with_scorefun(decoder, optimizer) -> \
         BanditObjective:
     """Get expected loss objective with score function control variate."""
@@ -306,6 +330,29 @@ def _get_samples(decoder, neg=False):
     return sample_ids, sample_logprobs, neg_ix
 
 
+def _get_samples_gaussian(decoder):
+    """ Retrieve samples from the model """
+    tf.get_variable_scope().reuse_variables()
+
+    _, _, sample_ids, sample_logprob, _, neg_ix, epsilons = \
+        decoder.attention_decoder(
+            decoder.embedded_go_symbols,
+            attention_on_input=decoder.attention_on_input,
+            train_mode=False,
+            sample_mode=0,  # sampling in parameter space -> greedy decoding
+            temperature=decoder.temperature,
+            scope="{}/attention_decoder".format(decoder.name),
+            order=0)
+
+    # expansion is necessary for generalization to multiple samples
+    # time x batch x sample_size
+    sample_ids = tf.expand_dims(tf.pack(sample_ids), 2)
+    # batch x sample_size
+    sample_logprobs = tf.expand_dims(sample_logprob, 1)
+
+    return sample_ids, sample_logprobs, epsilons
+
+
 def _get_sample_pairs(decoder):
     """ Sample a pair of outputs, one of them perturbed """
     sample_ids, sample_logprobs, _ = _get_samples(decoder, neg=False)
@@ -374,6 +421,26 @@ class ExpectedLossTrainer(GenericBanditTrainer):
             objective = expected_loss_objective(decoders[0], optimizer,
                                                 initial_temperature)
         super(ExpectedLossTrainer, self).__init__(
+            objective, evaluator, l1_weight, l2_weight,
+            clip_norm=clip_norm,
+            optimizer=optimizer, pairwise=False,
+            binary_feedback=binary_feedback,
+            store_gradients=store_gradients, baseline=baseline)
+
+class ProbitLossTrainer(GenericBanditTrainer):
+    """ Probit objective """
+
+    # for now sampling in projection layer
+
+    def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
+                 l2_weight=0., initial_temperature=0., clip_norm=False,
+                 optimizer=None, binary_feedback=False,
+                 store_gradients=False,
+                 baseline=False, score_function=False) -> None:
+        self.store_gradients = store_gradients
+        objective = probit_loss_objective(decoders[0], optimizer)
+
+        super(ProbitLossTrainer, self).__init__(
             objective, evaluator, l1_weight, l2_weight,
             clip_norm=clip_norm,
             optimizer=optimizer, pairwise=False,

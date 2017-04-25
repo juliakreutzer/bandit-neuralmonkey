@@ -17,7 +17,7 @@ from neuralmonkey.nn.projection import linear
 from neuralmonkey.decoders.encoder_projection import (
     linear_encoder_projection, concat_encoder_projection, empty_initial_state)
 from neuralmonkey.decoders.output_projection import no_deep_output
-from neuralmonkey.gradient_utils import init_grad
+from neuralmonkey.gradient_utils import init_grad, Gradients
 
 
 # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -178,12 +178,14 @@ class Decoder(ModelPart):
                         if isinstance(e, Attentive)}
 
             # decoding with training target word inputs
-            _, _, _, _, self.train_logits, _ = self.attention_decoder(
+            _, _, _, _, self.train_logits, _, _ = self.attention_decoder(
                 self.embedded_go_symbols,
                 attention_on_input=self.attention_on_input,
                 train_inputs=embedded_train_inputs,
                 train_mode=True,
                 temperature=self.temperature, store_logits=True)
+
+            print(self.train_logits)
 
             assert not tf.get_variable_scope().reuse
             tf.get_variable_scope().reuse_variables()
@@ -199,7 +201,7 @@ class Decoder(ModelPart):
 
             # decoding during inference: without target word inputs
             self.runtime_rnn_outputs, self.runtime_rnn_states, decoded_ids, \
-            self.decoded_logprobs, self.runtime_logits, _ = \
+            self.decoded_logprobs, self.runtime_logits, _, _ = \
                 self.attention_decoder(
                     self.embedded_go_symbols,
                     attention_on_input=attention_on_input,
@@ -326,9 +328,23 @@ class Decoder(ModelPart):
                            self.dropout_keep_prob,
                            self.train_mode)
 
-    def _logit_function(self, state: tf.Tensor, factor=1.0) -> tf.Tensor:
+    def _logit_function(self, state: tf.Tensor, factor=1.0, noise=False) \
+            -> Tuple[tf.Tensor, Any]:
         state = dropout(state, self.dropout_keep_prob, self.train_mode)
-        return tf.matmul(state, factor * self.decoding_w) + self.decoding_b
+        if noise:
+            noise_distribution_w = tf.contrib.distributions.Normal(mu=0.0, sigma=1.0)
+            noise_distribution_b = tf.contrib.distributions.Normal(mu=0.0, sigma=1.0)
+            sample_size_w = self.decoding_w.get_shape()
+            sample_size_b = self.decoding_b.get_shape()
+            noise_w = noise_distribution_w.sample(sample_shape=sample_size_w)
+            noise_b = noise_distribution_b.sample(sample_shape=sample_size_b)
+            g = [(noise_w, self.decoding_w), (noise_b, self.decoding_b)]
+            return tf.batch_matmul(state, factor * (self.decoding_w+noise_w)) + \
+                   (self.decoding_b+noise_b), \
+                   g
+        else:
+            return tf.matmul(state, factor * self.decoding_w) + self.decoding_b, \
+                   None
 
     def _get_rnn_cell(self) -> tf.nn.rnn_cell.RNNCell:
         if self._rnn_cell == 'GRU':
@@ -397,9 +413,11 @@ class Decoder(ModelPart):
             temperature: float = 1.0,
             store_logits: bool = False,
             store_rnn_outputs: bool = False,
-            store_rnn_states: bool = False) -> Tuple[
+            store_rnn_states: bool = False,
+            order: int = 1,
+    ) -> Tuple[
         List[tf.Tensor], List[tf.Tensor], List[tf.Tensor],
-        List[tf.Tensor], List[tf.Tensor], tf.Tensor]:
+        List[tf.Tensor], List[tf.Tensor], tf.Tensor, List]:
         """Run the decoder RNN.
 
         Arguments:
@@ -432,6 +450,7 @@ class Decoder(ModelPart):
         predictions = []
         logprob_predicted = 0
         logits = []
+        epsilons = []
 
         with tf.variable_scope(scope or "attention_decoder"):
             if self._rnn_cell == 'GRU':
@@ -474,11 +493,11 @@ class Decoder(ModelPart):
                 elif train_mode:
                     if i < self.max_output_len:
                         inp = train_inputs[i - 1]
-                        out_activation = self._logit_function(prev, factor=temp)
+                        out_activation, _ = self._logit_function(prev, factor=temp)
                         if store_logits:
                             logits.append(out_activation)
                     else:
-                        out_activation = self._logit_function(prev, factor=temp)
+                        out_activation, _ = self._logit_function(prev, factor=temp)
                         if store_logits:
                             logits.append(out_activation)
                         break
@@ -488,7 +507,17 @@ class Decoder(ModelPart):
                     # 2) sampling, either from positive or negative logits
                     with tf.variable_scope("loop_function", reuse=True):
 
-                        out_activation = self._logit_function(prev, factor=temp)
+                        if order != 0:
+                            # sampling in output projection or greedy decoding
+                            out_activation, _ = self._logit_function(prev,
+                                                                    factor=temp,
+                                                                    noise=False)
+
+                        else:  # add noise during decoding on output projection
+                            out_activation, epsilons = self._logit_function(prev,
+                                                                  factor=temp,
+                                                                  noise=True)
+
                         if store_logits:
                             logits.append(out_activation)
 
@@ -497,8 +526,8 @@ class Decoder(ModelPart):
                             prev_word_index = tf.cast(tf.argmax(out_activation,
                                                                 1), tf.int32)
 
-                        else:
-                            # sampling
+                        elif order == 1:
+                            # first-order sampling
                             out_activation = out_activation  # /temp
                             prev_word_index = tf.stop_gradient(tf.cast(
                                 tf.multinomial(out_activation, 1),
@@ -574,7 +603,8 @@ class Decoder(ModelPart):
                 if store_rnn_outputs:
                     outputs.append(output)
 
-        return outputs, states, predictions, logprob_predicted, logits, ix - 1
+        return outputs, states, predictions, logprob_predicted, logits, ix-1,\
+               epsilons
 
     def _visualize_attention(self, neg=False):
         """Create image summaries with attentions"""
