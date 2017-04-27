@@ -337,7 +337,9 @@ class Decoder(ModelPart):
             sample_size_w = self.decoding_w.get_shape()
             sample_size_b = self.decoding_b.get_shape()
             noise_w = noise_distribution_w.sample(sample_shape=sample_size_w)
+            noise_w = tf.nn.l2_normalize(noise_w, [0,1])
             noise_b = noise_distribution_b.sample(sample_shape=sample_size_b)
+            noise_b = tf.nn.l2_normalize(noise_b, 0)
             g = [(noise_w, self.decoding_w), (noise_b, self.decoding_b)]
             return tf.batch_matmul(state, factor * (self.decoding_w+noise_w)) + \
                    (self.decoding_b+noise_b), \
