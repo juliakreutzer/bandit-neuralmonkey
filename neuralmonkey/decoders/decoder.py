@@ -332,18 +332,33 @@ class Decoder(ModelPart):
             -> Tuple[tf.Tensor, Any]:
         state = dropout(state, self.dropout_keep_prob, self.train_mode)
         if noise:
-            noise_distribution_w = tf.contrib.distributions.Normal(mu=0.0, sigma=1.0)
-            noise_distribution_b = tf.contrib.distributions.Normal(mu=0.0, sigma=1.0)
-            sample_size_w = self.decoding_w.get_shape()
-            sample_size_b = self.decoding_b.get_shape()
-            noise_w = noise_distribution_w.sample(sample_shape=sample_size_w)
-            noise_w = tf.nn.l2_normalize(noise_w, [0,1])
-            noise_b = noise_distribution_b.sample(sample_shape=sample_size_b)
-            noise_b = tf.nn.l2_normalize(noise_b, 0)
-            g = [(noise_w, self.decoding_w), (noise_b, self.decoding_b)]
-            return tf.batch_matmul(state, factor * (self.decoding_w+noise_w)) + \
-                   (self.decoding_b+noise_b), \
-                   g
+            noise_distribution_w = tf.contrib.distributions.Normal(mu=0.0,
+                                                                   sigma=1.0)
+            noise_distribution_b = tf.contrib.distributions.Normal(mu=0.0,
+                                                                   sigma=1.0)
+
+            # loop over batch: sample and compute output
+            def output_proj(s):
+                sample_size_w = self.decoding_w.get_shape()
+                sample_size_b = self.decoding_b.get_shape()
+                noise_w = noise_distribution_w.sample(
+                    sample_shape=sample_size_w)
+                # noise_w = tf.nn.l2_normalize(noise_w, [0, 1])
+                noise_b = noise_distribution_b.sample(
+                    sample_shape=sample_size_b)
+                # noise_b = tf.nn.l2_normalize(noise_b, 0)
+                print(tf.matmul(tf.expand_dims(s,0), factor*(self.decoding_w+noise_w))  + \
+                (self.decoding_b + noise_b))
+                return tf.matmul(tf.expand_dims(s,0), factor * (self.decoding_w + noise_w)) + \
+                (self.decoding_b + noise_b)
+
+            result = tf.map_fn(lambda x: output_proj(x), state)
+            squeezed = tf.squeeze(result, [1])
+
+            #g = [(noise_w, self.decoding_w), (noise_b, self.decoding_b)]
+            g = None  # TODO keep track of noise
+
+            return squeezed, g
         else:
             return tf.matmul(state, factor * self.decoding_w) + self.decoding_b, \
                    None
