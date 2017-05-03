@@ -28,7 +28,8 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
     def __call__(self, inputs, state, noise,
                  scope=None) -> Tuple[tf.Tensor, tf.Tensor]:
         """Gated recurrent unit (GRU) with nunits cells."""
-        with tf.variable_scope(scope or type(self).__name__):  # "GRUCell"
+        with tf.variable_scope("GRUCell"): #scope or type(self).__name__):  # "GRUCell"
+            print(tf.get_variable_scope().name)
             with tf.variable_scope("Gates"):  # Reset gate and update gate.
                 input_shape = inputs.get_shape().as_list()[1]
                 state_shape = state.get_shape().as_list()[1]
@@ -38,14 +39,18 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
                 # noise matrix is only half the size of recurrent matrix
                 #print("noise matrix {} ".format(noise_matrix))
 
+                print(tf.get_variable_scope())
+                linear_transform = linear([inputs, state], 2 * self._num_units, scope=tf.get_variable_scope(),
+                                bias=True)
+
                 # first part of noise matrix that transforms input is empty
                 noise_empty = tf.zeros([input_shape, 2*self._num_units])
                 # second part is sampled from Gaussian
                 gradient_val = tf.concat(0, [noise_empty, noise_matrix])
+                print([v.name for v in tf.trainable_variables()])
+                tf.get_variable_scope().reuse_variables()
                 gradient = [(gradient_val, tf.get_variable(
                     "Linear/Matrix", shape=[input_shape+state_shape, 2*self._num_units]))]
-                linear_transform = linear([inputs, state], 2 * self._num_units,
-                                bias=True)
                 #print("linear transform {}".format(linear_transform))
 
                 if noise:
@@ -63,7 +68,7 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
 
             with tf.variable_scope("Candidate"):
                 c = tf.tanh(linear([inputs, r * state],
-                                   self._num_units, bias=True))
+                                   self._num_units, scope=tf.get_variable_scope(), bias=True))
             new_h = u * state + (1 - u) * c  # batch_size x rnn_size
             return new_h, new_h, gradient
 
