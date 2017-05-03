@@ -80,14 +80,14 @@ def probit_loss_objective(decoder, optimizer) -> BanditObjective:
     sample_ids, sample_logprobs, sample_epsilon =_get_samples_gaussian(decoder)
     # get feedback for sample
     # compute gradient: learning_rate*-reward*epsilon (w/o backprop)
-    # gradients = scale_gradients(sample_epsilon, tf.reduce_mean(-decoder.rewards))
+    scaled_gradients = scale_gradients(sample_epsilon, tf.reduce_mean(-decoder.rewards))
 
     # gradients with backpropagation
-    scalars = tf.stop_gradient(
-        -(decoder.rewards - decoder.baseline)
-    )  # batch_size x 1
-    scaled_gradients = optimizer.compute_gradients(
-        tf.reduce_mean(sample_logprobs * scalars))
+    #scalars = tf.stop_gradient(
+    #    -(decoder.rewards - decoder.baseline)
+    #)  # batch_size x 1
+    #scaled_gradients = optimizer.compute_gradients(
+    #    tf.reduce_mean(sample_logprobs * scalars))
 
     # learning rate is added later when optimizer.apply_gradient is called
     decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
@@ -342,7 +342,7 @@ def _get_samples_gaussian(decoder):
     """ Retrieve samples from the model """
     tf.get_variable_scope().reuse_variables()
 
-    _, _, sample_ids, sample_logprob, _, neg_ix, epsilons = \
+    _, _, sample_ids, sample_logprob, _, neg_ix, gradient = \
         decoder.attention_decoder(
             decoder.embedded_go_symbols,
             attention_on_input=decoder.attention_on_input,
@@ -358,7 +358,7 @@ def _get_samples_gaussian(decoder):
     # batch x sample_size
     sample_logprobs = tf.expand_dims(sample_logprob, 1)
 
-    return sample_ids, sample_logprobs, epsilons
+    return sample_ids, sample_logprobs, gradient
 
 
 def _get_sample_pairs(decoder):

@@ -18,6 +18,7 @@ from neuralmonkey.decoders.encoder_projection import (
     linear_encoder_projection, concat_encoder_projection, empty_initial_state)
 from neuralmonkey.decoders.output_projection import no_deep_output
 from neuralmonkey.gradient_utils import init_grad, Gradients
+from neuralmonkey.noise_utils import NoisyGRUCell
 
 
 # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -328,44 +329,16 @@ class Decoder(ModelPart):
                            self.dropout_keep_prob,
                            self.train_mode)
 
-    def _logit_function(self, state: tf.Tensor, factor=1.0, noise=False) \
+    def _logit_function(self, state: tf.Tensor, factor=1.0) \
             -> Tuple[tf.Tensor, Any]:
         state = dropout(state, self.dropout_keep_prob, self.train_mode)
-        if noise:
-            noise_distribution_w = tf.contrib.distributions.Normal(mu=0.0,
-                                                                   sigma=1.0)
-            noise_distribution_b = tf.contrib.distributions.Normal(mu=0.0,
-                                                                   sigma=1.0)
-
-            # loop over batch: sample and compute output
-            def output_proj(s):
-                sample_size_w = self.decoding_w.get_shape()
-                sample_size_b = self.decoding_b.get_shape()
-                noise_w = noise_distribution_w.sample(
-                    sample_shape=sample_size_w)
-                # noise_w = tf.nn.l2_normalize(noise_w, [0, 1])
-                noise_b = noise_distribution_b.sample(
-                    sample_shape=sample_size_b)
-                # noise_b = tf.nn.l2_normalize(noise_b, 0)
-                print(tf.matmul(tf.expand_dims(s,0), factor*(self.decoding_w+noise_w))  + \
-                (self.decoding_b + noise_b))
-                return tf.matmul(tf.expand_dims(s,0), factor * (self.decoding_w + noise_w)) + \
-                (self.decoding_b + noise_b)
-
-            result = tf.map_fn(lambda x: output_proj(x), state)
-            squeezed = tf.squeeze(result, [1])
-
-            #g = [(noise_w, self.decoding_w), (noise_b, self.decoding_b)]
-            g = None  # TODO keep track of noise
-
-            return squeezed, g
-        else:
-            return tf.matmul(state, factor * self.decoding_w) + self.decoding_b, \
-                   None
+        return tf.matmul(state, factor * self.decoding_w) + self.decoding_b
 
     def _get_rnn_cell(self) -> tf.nn.rnn_cell.RNNCell:
         if self._rnn_cell == 'GRU':
             return tf.nn.rnn_cell.GRUCell(self.rnn_size)
+        elif self._rnn_cell == 'NoisyGRU':
+            return NoisyGRUCell(self.rnn_size)
         elif self._rnn_cell == 'LSTM':
             return tf.nn.rnn_cell.LSTMCell(self.rnn_size)
         else:
@@ -470,7 +443,7 @@ class Decoder(ModelPart):
         epsilons = []
 
         with tf.variable_scope(scope or "attention_decoder"):
-            if self._rnn_cell == 'GRU':
+            if 'GRU' in self._rnn_cell:
                 state = self.initial_state
             elif self._rnn_cell == 'LSTM':
                 # pylint: disable=redefined-variable-type
@@ -510,11 +483,11 @@ class Decoder(ModelPart):
                 elif train_mode:
                     if i < self.max_output_len:
                         inp = train_inputs[i - 1]
-                        out_activation, _ = self._logit_function(prev, factor=temp)
+                        out_activation = self._logit_function(prev, factor=temp)
                         if store_logits:
                             logits.append(out_activation)
                     else:
-                        out_activation, _ = self._logit_function(prev, factor=temp)
+                        out_activation = self._logit_function(prev, factor=temp)
                         if store_logits:
                             logits.append(out_activation)
                         break
@@ -524,16 +497,8 @@ class Decoder(ModelPart):
                     # 2) sampling, either from positive or negative logits
                     with tf.variable_scope("loop_function", reuse=True):
 
-                        if order != 0:
-                            # sampling in output projection or greedy decoding
-                            out_activation, _ = self._logit_function(prev,
-                                                                    factor=temp,
-                                                                    noise=False)
-
-                        else:  # add noise during decoding on output projection
-                            out_activation, epsilons = self._logit_function(prev,
-                                                                  factor=temp,
-                                                                  noise=True)
+                        out_activation = self._logit_function(prev,
+                                                                  factor=temp)
 
                         if store_logits:
                             logits.append(out_activation)
@@ -595,7 +560,13 @@ class Decoder(ModelPart):
                         x = inp
                     # Run the RNN.
 
-                    cell_output, state = cell(x, state)
+                    if order != 0:
+                        cell_output, state, gradient = cell(x, state,
+                                                            noise=False)
+                    else:
+                        cell_output, state, gradient = \
+                            cell(x, state, noise=True)
+
                     if store_rnn_states:
                         states.append(state)
 
@@ -621,7 +592,7 @@ class Decoder(ModelPart):
                     outputs.append(output)
 
         return outputs, states, predictions, logprob_predicted, logits, ix-1,\
-               epsilons
+               gradient
 
     def _visualize_attention(self, neg=False):
         """Create image summaries with attentions"""
