@@ -186,8 +186,6 @@ class Decoder(ModelPart):
                 train_mode=True,
                 temperature=self.temperature, store_logits=True)
 
-            print(self.train_logits)
-
             assert not tf.get_variable_scope().reuse
             tf.get_variable_scope().reuse_variables()
 
@@ -472,6 +470,15 @@ class Decoder(ModelPart):
 
             voc_size = len(self.vocabulary)
 
+            noise_matrix = None
+            if order != 1:
+                noise_dist = tf.contrib.distributions.Normal(mu=0., sigma=1.)
+                noise_shape = [self.rnn_size, 2 * self.rnn_size]
+                noise_matrix = tf.Variable(tf.zeros(noise_shape), trainable=False)
+                # only sample once per batch and use this noise for the whole sequence
+                noise_matrix.assign(noise_dist.sample(noise_shape))
+                noise_matrix = tf.nn.l2_normalize(noise_matrix, [0, 1])
+
             for i, temp in zip(range(self.max_output_len + 1), temps):
                 if i > 0:
                     tf.get_variable_scope().reuse_variables()
@@ -560,12 +567,11 @@ class Decoder(ModelPart):
                         x = inp
                     # Run the RNN.
 
-                    if order != 0:
-                        cell_output, state, gradient = cell(x, state,
-                                                            noise=False)
-                    else:
-                        cell_output, state, gradient = \
-                            cell(x, state, noise=True)
+
+                    # TODO feed same noise for whole batch and all timesteps
+                    # if order is not 0, noise_matrix is None
+                    cell_output, state, gradient = \
+                        cell(x, state, noise_recurrent=noise_matrix)
 
                     if store_rnn_states:
                         states.append(state)

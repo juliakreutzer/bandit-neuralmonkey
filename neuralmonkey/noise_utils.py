@@ -25,36 +25,31 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
     def state_size(self):
         return self._num_units
 
-    def __call__(self, inputs, state, noise,
+    def __call__(self, inputs, state, noise_recurrent=None,
                  scope=None) -> Tuple[tf.Tensor, tf.Tensor]:
         """Gated recurrent unit (GRU) with nunits cells."""
         with tf.variable_scope("GRUCell"): #scope or type(self).__name__):  # "GRUCell"
-            print(tf.get_variable_scope().name)
             with tf.variable_scope("Gates"):  # Reset gate and update gate.
                 input_shape = inputs.get_shape().as_list()[1]
-                state_shape = state.get_shape().as_list()[1]
-                noise_shape = [state_shape, 2 * self._num_units]
-                noise_dist = tf.contrib.distributions.Normal(mu=0., sigma=1.)
-                noise_matrix = noise_dist.sample(noise_shape)
-                # noise matrix is only half the size of recurrent matrix
-                #print("noise matrix {} ".format(noise_matrix))
+                state_shape = self._num_units
+                linear_transform = linear([inputs, state], 2 * self._num_units,
+                                          scope=tf.get_variable_scope(),
+                                          bias=True)
+                gradient = None
+                if noise_recurrent is not None:
+                    # first part of noise matrix that transforms input is empty
+                    noise_empty = tf.zeros([input_shape, 2*self._num_units])
+                    # second part is sampled from Gaussian
+                    gradient_val = tf.concat(0, [noise_empty, noise_recurrent])
+                    print([v.name for v in tf.trainable_variables()])
+                    tf.get_variable_scope().reuse_variables()
+                    gradient = [(gradient_val,
+                                 tf.get_variable("Linear/Matrix",
+                                                 shape=[input_shape+state_shape,
+                                                        2*self._num_units]))]
 
-                print(tf.get_variable_scope())
-                linear_transform = linear([inputs, state], 2 * self._num_units, scope=tf.get_variable_scope(),
-                                bias=True)
-
-                # first part of noise matrix that transforms input is empty
-                noise_empty = tf.zeros([input_shape, 2*self._num_units])
-                # second part is sampled from Gaussian
-                gradient_val = tf.concat(0, [noise_empty, noise_matrix])
-                print([v.name for v in tf.trainable_variables()])
-                tf.get_variable_scope().reuse_variables()
-                gradient = [(gradient_val, tf.get_variable(
-                    "Linear/Matrix", shape=[input_shape+state_shape, 2*self._num_units]))]
-                #print("linear transform {}".format(linear_transform))
-
-                if noise:
-                    to_add = tf.batch_matmul(state, noise_matrix)
+                if noise_recurrent is not None:
+                    to_add = tf.batch_matmul(state, noise_recurrent)
                     linear_transform += to_add
 
                 # We start with bias of 1.0 to not reset and not update.
