@@ -40,7 +40,6 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
                     # first part of noise matrix that transforms input is empty
                     noise_empty = tf.zeros([input_shape, 2*self._num_units])
                     # second part is sampled from Gaussian
-                    gradient_val = tf.concat(0, [noise_empty, noise_recurrent])
                     tf.get_variable_scope().reuse_variables()
 
                     mean, var = tf.nn.moments(tf.get_variable("Linear/Matrix",
@@ -51,6 +50,8 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
                     noise_recurrent = tf.nn.batch_normalization(
                         noise_recurrent, mean=mean, variance=var, offset=None,
                         scale=None, variance_epsilon=1.0e-5)
+
+                    gradient_val = tf.concat(0, [noise_empty, noise_recurrent])
 
                     gradient = [(gradient_val,
                                  tf.get_variable("Linear/Matrix",
