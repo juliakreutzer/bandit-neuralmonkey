@@ -80,7 +80,7 @@ def probit_loss_objective(decoder, optimizer) -> BanditObjective:
     sample_ids, sample_logprobs, sample_epsilon =_get_samples_gaussian(decoder)
     # get feedback for sample
     # compute gradient: learning_rate*-reward*epsilon (w/o backprop)
-    scaled_gradients = scale_gradients(sample_epsilon, tf.reduce_mean(-decoder.rewards))
+    scaled_gradients = scale_gradients(sample_epsilon, tf.reduce_mean(-(decoder.rewards-decoder.baseline)))
 
     # gradients with backpropagation
     #scalars = tf.stop_gradient(
