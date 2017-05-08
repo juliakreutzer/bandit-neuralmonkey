@@ -472,7 +472,12 @@ class Decoder(ModelPart):
 
             noise_matrix = None
             if order != 1:
-                noise_dist = tf.contrib.distributions.Normal(mu=0., sigma=1.)
+                with tf.variable_scope("GRUCell/Gates"):
+                    tf.get_variable_scope().reuse_variables()
+                    mean, var = tf.nn.moments(tf.get_variable("Linear/Matrix",
+                                                              shape=[self.embedding_size + self.rnn_size, 2 * self.rnn_size]), axes=[0, 1])
+
+                noise_dist = tf.contrib.distributions.Normal(mu=mean, sigma=tf.sqrt(var))
                 noise_shape = [self.embedding_size+self.rnn_size, 2 * self.rnn_size]
                 # TODO better: add noise directly to W, then subtract
                 noise_matrix = tf.Variable(tf.zeros(noise_shape), trainable=False)

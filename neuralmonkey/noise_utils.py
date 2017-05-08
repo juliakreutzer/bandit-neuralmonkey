@@ -3,11 +3,7 @@ from typing import cast, Iterable, List, Callable, Optional, Union, Any, \
 
 import tensorflow as tf
 from neuralmonkey.nn.projection import linear
-from tensorflow.python.ops import variable_scope as vs
 
-
-
-#class NoisyGRUCell(tf.contrib.rnn.RNNCell):
 class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
     """
     Gated Recurrent Unit cell with noise in recursion function.
@@ -42,14 +38,14 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
                     # second part is sampled from Gaussian
                     tf.get_variable_scope().reuse_variables()
 
-                    mean, var = tf.nn.moments(tf.get_variable("Linear/Matrix",
-                                                 shape=[input_shape+state_shape,
-                                                        2*self._num_units]),
-                                              axes=[0, 1])
+                    #mean, var = tf.nn.moments(tf.get_variable("Linear/Matrix",
+                    #                             shape=[input_shape+state_shape,
+                    #                                    2*self._num_units]),
+                    #                          axes=[0, 1])
                     # batch-normalize noise according to mean and var of matrix
-                    noise_recurrent = tf.nn.batch_normalization(
-                        noise_recurrent, mean=mean, variance=var, offset=None,
-                        scale=None, variance_epsilon=1.0e-5)
+                    #noise_recurrent = tf.nn.batch_normalization(
+                    #    noise_recurrent, mean=mean, variance=var, offset=None,
+                    #    scale=None, variance_epsilon=1.0e-5)
 
                     #gradient_val = tf.concat(0, [noise_empty, noise_recurrent])
                     gradient_val = noise_recurrent
