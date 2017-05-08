@@ -22,7 +22,7 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
         return self._num_units
 
     def __call__(self, inputs, state, noise_recurrent=None,
-                 scope=None) -> Tuple[tf.Tensor, tf.Tensor]:
+                 scope=None, delta=1.0) -> Tuple[tf.Tensor, tf.Tensor]:
         """Gated recurrent unit (GRU) with nunits cells."""
         with tf.variable_scope("GRUCell"): #scope or type(self).__name__):  # "GRUCell"
             with tf.variable_scope("Gates"):  # Reset gate and update gate.
@@ -57,7 +57,7 @@ class NoisyGRUCell(tf.nn.rnn_cell.RNNCell):
                     # noise to both recurrent matrices
                     input_and_state = tf.concat(1, [inputs, state])
                     to_add = tf.batch_matmul(input_and_state, noise_recurrent)
-                    linear_transform += to_add
+                    linear_transform += delta*to_add
 
                 # We start with bias of 1.0 to not reset and not update.
                 r, u = tf.split(1, 2, linear_transform)

@@ -403,6 +403,7 @@ class Decoder(ModelPart):
             store_rnn_outputs: bool = False,
             store_rnn_states: bool = False,
             order: int = 1,
+            delta: float = 1.,
     ) -> Tuple[
         List[tf.Tensor], List[tf.Tensor], List[tf.Tensor],
         List[tf.Tensor], List[tf.Tensor], tf.Tensor, List]:
@@ -577,7 +578,7 @@ class Decoder(ModelPart):
                     # TODO feed same noise for whole batch and all timesteps
                     # if order is not 0, noise_matrix is None
                     cell_output, state, gradient = \
-                        cell(x, state, noise_recurrent=noise_matrix)
+                        cell(x, state, noise_recurrent=noise_matrix, delta=delta)
 
                     if store_rnn_states:
                         states.append(state)

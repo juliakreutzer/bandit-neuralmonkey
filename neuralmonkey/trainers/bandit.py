@@ -71,13 +71,13 @@ def expected_loss_objective(decoder, optimizer, initial_temperature) \
     )
 
 
-def probit_loss_objective(decoder, optimizer) -> BanditObjective:
+def probit_loss_objective(decoder, optimizer, delta=1.0) -> BanditObjective:
     """ Probit loss """
 
     # sample weights e from Gaussian
     # compute w'
     # decode under w'
-    sample_ids, sample_logprobs, sample_epsilon =_get_samples_gaussian(decoder)
+    sample_ids, sample_logprobs, sample_epsilon =_get_samples_gaussian(decoder, delta)
     # get feedback for sample
     # compute gradient: learning_rate*-reward*epsilon (w/o backprop)
     scaled_gradients = scale_gradients(sample_epsilon, tf.reduce_mean(-(decoder.rewards-decoder.baseline)))
@@ -338,7 +338,7 @@ def _get_samples(decoder, neg=False):
     return sample_ids, sample_logprobs, neg_ix
 
 
-def _get_samples_gaussian(decoder):
+def _get_samples_gaussian(decoder, delta):
     """ Retrieve samples from the model """
     tf.get_variable_scope().reuse_variables()
 
@@ -350,7 +350,7 @@ def _get_samples_gaussian(decoder):
             sample_mode=0,  # sampling in parameter space -> greedy decoding
             temperature=decoder.temperature,
             scope="{}/attention_decoder".format(decoder.name),
-            order=0)
+            order=0, delta=delta)
 
     # expansion is necessary for generalization to multiple samples
     # time x batch x sample_size
@@ -443,10 +443,10 @@ class ProbitLossTrainer(GenericBanditTrainer):
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
                  optimizer=None, binary_feedback=False,
-                 store_gradients=False,
+                 store_gradients=False, delta=1.0,
                  baseline=False, score_function=False) -> None:
         self.store_gradients = store_gradients
-        objective = probit_loss_objective(decoders[0], optimizer)
+        objective = probit_loss_objective(decoders[0], optimizer, delta=delta)
 
         super(ProbitLossTrainer, self).__init__(
             objective, evaluator, l1_weight, l2_weight,
