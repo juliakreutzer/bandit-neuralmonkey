@@ -477,8 +477,8 @@ class Decoder(ModelPart):
                 # TODO better: add noise directly to W, then subtract
                 noise_matrix = tf.Variable(tf.zeros(noise_shape), trainable=False)
                 # only sample once per batch and use this noise for the whole sequence
-                noise_matrix.assign(noise_dist.sample(noise_shape))
-                noise_matrix = tf.nn.l2_normalize(noise_matrix, [0, 1])
+                noise_matrix = noise_matrix.assign(noise_dist.sample(noise_shape))
+                #noise_matrix = tf.nn.l2_normalize(noise_matrix, [0, 1])
 
             for i, temp in zip(range(self.max_output_len + 1), temps):
                 if i > 0:
