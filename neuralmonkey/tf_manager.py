@@ -69,7 +69,7 @@ class TensorFlowManager(object):
         for sess in self.sessions:
             sess.run(init_op)
 
-        self.saver = tf.train.Saver(max_to_keep=self.saver_max_to_keep)
+        #self.saver = tf.train.Saver(max_to_keep=self.saver_max_to_keep)
 
         if api_key_file is not None:
             self.api_key = self.api_key_from_file(api_key_file)
@@ -78,12 +78,28 @@ class TensorFlowManager(object):
 
         self.host = host
 
-        if variable_files:
+        if variable_files:  # restore all possible variables, initialize the rest
+            reader = tf.train.NewCheckpointReader(variable_files[0])
+            saved_shapes = reader.get_variable_to_shape_map()
+            var_names = sorted([(var.name, var.name.split(':')[0]) for var in tf.all_variables() if var.name.split(':')[0] in saved_shapes])
+            restore_vars = []
+            name2var = dict(zip(map(lambda x:x.name.split(':')[0], tf.all_variables()), tf.all_variables()))
+            with tf.variable_scope(tf.get_variable_scope(), reuse=True):
+                for var_name, saved_var_name in var_names:
+                    curr_var = name2var[saved_var_name]
+                    var_shape = curr_var.get_shape().as_list()
+                    if var_shape == saved_shapes[saved_var_name]:
+                        restore_vars.append(curr_var)
+            self.saver = tf.train.Saver(restore_vars, max_to_keep=self.saver_max_to_keep)
+
             if len(variable_files) != num_sessions:
                 raise Exception(("The number of provided variable files ({}) "
                                  "is different than a number sessions ({})")
                                 .format(len(variable_files), num_sessions))
             self.restore(variable_files)
+        else:
+            self.saver = tf.train.Saver(max_to_keep=self.saver_max_to_keep)
+
 
 
     # pylint: disable=too-many-locals
