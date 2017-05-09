@@ -46,7 +46,8 @@ class SentenceEncoder(ModelPart, Attentive):
                  parent_encoder: Optional["SentenceEncoder"]=None,
                  save_checkpoint: Optional[str]=None,
                  load_checkpoint: Optional[str]=None,
-                 train_mode: bool=False) -> None:
+                 train_mode: bool=False,
+                 delta: float=1.0) -> None:
         """Createes a new instance of the sentence encoder
 
         Arguments:
@@ -110,7 +111,7 @@ class SentenceEncoder(ModelPart, Attentive):
                         parallel_iterations=None,
                         swap_memory=None,
                         time_major=time_major, scope=fw_scope,
-                        train_mode=train_mode)
+                        train_mode=train_mode, direction="fw", delta=delta)
 
                 # Backward direction
                 if not time_major:
@@ -131,7 +132,7 @@ class SentenceEncoder(ModelPart, Attentive):
                         parallel_iterations=None,
                         swap_memory=None,
                         time_major=time_major, scope=bw_scope,
-                        train_mode=train_mode)
+                        train_mode=train_mode, direction="bw", delta=delta)
 
             output_bw = tf.reverse_sequence(
                 input=tmp, seq_lengths=self.sentence_lengths,

@@ -88,7 +88,7 @@ def _rnn_step(
 
 def noisy_dynamic_rnn(cell, inputs, sequence_length=None, initial_state=None,
                 dtype=None, parallel_iterations=None, swap_memory=False,
-                time_major=False, scope=None, train_mode=False, direction="fw"):
+                time_major=False, scope=None, train_mode=False, direction="fw", delta=1.0):
     flat_input = nest.flatten(inputs)
 
     if not time_major:
@@ -148,7 +148,7 @@ def noisy_dynamic_rnn(cell, inputs, sequence_length=None, initial_state=None,
             parallel_iterations=parallel_iterations,
             swap_memory=swap_memory,
             sequence_length=sequence_length,
-            dtype=dtype, train_mode=train_mode, direction=direction)
+            dtype=dtype, train_mode=train_mode, direction=direction, delta=delta)
 
         # Outputs of _dynamic_rnn_loop are always shaped [time, batch, depth].
         # If we are performing batch-major calculations, transpose output back
@@ -170,7 +170,7 @@ def noisy_dynamic_rnn_loop(cell,
                            parallel_iterations,
                            swap_memory,
                            sequence_length=None,
-                           dtype=None, train_mode=False, direction="fw"):
+                           dtype=None, train_mode=False, direction="fw", delta=1.0):
     state = initial_state
     assert isinstance(parallel_iterations,
                       int), "parallel_iterations must be int"
@@ -285,7 +285,7 @@ def noisy_dynamic_rnn_loop(cell,
 
         input_t = nest.pack_sequence_as(structure=inputs, flat_sequence=input_t)
         if train_mode:
-            call_cell = lambda: cell(input_t, state, noise_recurrent=noise_matrix)
+            call_cell = lambda: cell(input_t, state, noise_recurrent=noise_matrix, delta=delta)
         else:
             call_cell = lambda: cell(input_t, state)
 
