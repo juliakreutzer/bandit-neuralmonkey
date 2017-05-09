@@ -74,13 +74,22 @@ def expected_loss_objective(decoder, optimizer, initial_temperature) \
 def probit_loss_objective(decoder, optimizer, delta=1.0) -> BanditObjective:
     """ Probit loss """
 
-    # sample weights e from Gaussian
+    # sample weights epsilon from Gaussian
     # compute w'
     # decode under w'
     sample_ids, sample_logprobs, sample_epsilon =_get_samples_gaussian(decoder, delta)
     # get feedback for sample
     # compute gradient: learning_rate*-reward*epsilon (w/o backprop)
-    scaled_gradients = scale_gradients(sample_epsilon, tf.reduce_mean(-(decoder.rewards-decoder.baseline)))
+
+    # get epsilons from encoder as well
+    encoder = decoder.encoders[0]
+    sample_epsilon.extend(encoder.gradients)
+
+    # negated epsilon since gradient ascent -> negation of reward is left out
+    print("Gradient {}".format(sample_epsilon))
+    scaled_gradients = scale_gradients(sample_epsilon,
+                                       (tf.reduce_mean(decoder.rewards)
+                                         -decoder.baseline))
 
     # gradients with backpropagation
     #scalars = tf.stop_gradient(
@@ -91,7 +100,6 @@ def probit_loss_objective(decoder, optimizer, delta=1.0) -> BanditObjective:
 
     # learning rate is added later when optimizer.apply_gradient is called
     decoder.neg_sample_ix = tf.constant(-1)  # not used but needed for outputs
-
 
     return BanditObjective(
         name="{} - probit_loss".format(decoder.name),

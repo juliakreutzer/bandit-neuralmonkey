@@ -7,11 +7,13 @@ import tensorflow as tf
 from neuralmonkey.encoders.attentive import Attentive
 from neuralmonkey.model.model_part import ModelPart, FeedDict
 from neuralmonkey.logging import log
-from neuralmonkey.nn.noisy_gru_cell import NoisyGRUCell
+from neuralmonkey.nn.noisy_gru_cell import NoisyGRUCell as NoisyActivatedGRUCell
+from neuralmonkey.noise_utils import NoisyOrthoGRUCell, noisy_dynamic_rnn
 from neuralmonkey.nn.ortho_gru_cell import OrthoGRUCell
 from neuralmonkey.dataset import Dataset
 from neuralmonkey.vocabulary import Vocabulary
 from neuralmonkey.nn.utils import dropout
+
 
 # pylint: disable=invalid-name
 AttType = Any  # Type[] or union of types do not work here
@@ -36,13 +38,15 @@ class SentenceEncoder(ModelPart, Attentive):
                  max_input_len: int,
                  embedding_size: int,
                  rnn_size: int,
+                 rnn_cell: str="GRU",
                  dropout_keep_prob: float=1.0,
                  attention_type: Optional[AttType]=None,
                  attention_fertility: int=3,
                  use_noisy_activations: bool=False,
                  parent_encoder: Optional["SentenceEncoder"]=None,
                  save_checkpoint: Optional[str]=None,
-                 load_checkpoint: Optional[str]=None) -> None:
+                 load_checkpoint: Optional[str]=None,
+                 train_mode: bool=False) -> None:
         """Createes a new instance of the sentence encoder
 
         Arguments:
@@ -56,6 +60,7 @@ class SentenceEncoder(ModelPart, Attentive):
                 that the actual encoder output state size will be
                 twice as long because it is the result of
                 concatenation of forward and backward hidden states.
+            train_mode: during training noise is added, but not during testing
 
         Keyword arguments:
             dropout_keep_prob: The dropout keep probability
@@ -75,6 +80,7 @@ class SentenceEncoder(ModelPart, Attentive):
         self.max_input_len = max_input_len
         self.embedding_size = embedding_size
         self.rnn_size = rnn_size
+        self.rnn_cell = rnn_cell
         self.dropout_keep_p = dropout_keep_prob
         self.use_noisy_activations = use_noisy_activations
         self.parent_encoder = parent_encoder
@@ -89,9 +95,50 @@ class SentenceEncoder(ModelPart, Attentive):
                 embedded_inputs = self._embed(self.inputs)  # type: tf.Tensor
 
             fw_cell, bw_cell = self.rnn_cells()  # type: RNNCellTuple
-            self.outputs_bidi_tup, encoded_tup = tf.nn.bidirectional_dynamic_rnn(
-                fw_cell, bw_cell, embedded_inputs, self.sentence_lengths,
-                dtype=tf.float32)
+
+
+            # from tf.nn.bidirectional_dynamic_rnn
+            time_major = False  # default
+
+            with tf.variable_scope("BiRNN"):
+                # Forward direction
+                with tf.variable_scope("FW") as fw_scope:
+                    output_fw, output_state_fw, gradient_fw = noisy_dynamic_rnn(
+                        cell=fw_cell, inputs=embedded_inputs,
+                        sequence_length=self.sentence_lengths,
+                        initial_state=None, dtype=tf.float32,
+                        parallel_iterations=None,
+                        swap_memory=None,
+                        time_major=time_major, scope=fw_scope,
+                        train_mode=train_mode)
+
+                # Backward direction
+                if not time_major:
+                    time_dim = 1
+                    batch_dim = 0
+                else:
+                    time_dim = 0
+                    batch_dim = 1
+
+                with tf.variable_scope("BW") as bw_scope:
+                    inputs_reverse = tf.reverse_sequence(
+                        input=embedded_inputs, seq_lengths=self.sentence_lengths,
+                        seq_dim=time_dim, batch_dim=batch_dim)
+                    tmp, output_state_bw, gradient_bw = noisy_dynamic_rnn(
+                        cell=bw_cell, inputs=inputs_reverse,
+                        sequence_length=self.sentence_lengths,
+                        initial_state=None, dtype=tf.float32,
+                        parallel_iterations=None,
+                        swap_memory=None,
+                        time_major=time_major, scope=bw_scope,
+                        train_mode=train_mode)
+
+            output_bw = tf.reverse_sequence(
+                input=tmp, seq_lengths=self.sentence_lengths,
+                seq_dim=time_dim, batch_dim=batch_dim)
+
+            self.outputs_bidi_tup = (output_fw, output_bw)
+            encoded_tup = (output_state_fw, output_state_bw)
 
             self.hidden_states = tf.concat(2, self.outputs_bidi_tup)
 
@@ -100,6 +147,7 @@ class SentenceEncoder(ModelPart, Attentive):
                     self.hidden_states, self.dropout_keep_p, self.train_mode)
 
             self.encoded = tf.concat(1, encoded_tup)
+            self.gradients = gradient_fw + gradient_bw  # list concat
 
         log("Sentence encoder initialized")
 
@@ -169,8 +217,11 @@ class SentenceEncoder(ModelPart, Attentive):
             return self.parent_encoder.rnn_cells()
 
         if self.use_noisy_activations:
-            return(NoisyGRUCell(self.rnn_size, self.train_mode),
-                   NoisyGRUCell(self.rnn_size, self.train_mode))
+            return(NoisyActivatedGRUCell(self.rnn_size, self.train_mode),
+                   NoisyActivatedGRUCell(self.rnn_size, self.train_mode))
+
+        if self.rnn_cell == "NoisyOrthoGRU":
+            return (NoisyOrthoGRUCell(self.rnn_size), NoisyOrthoGRUCell(self.rnn_size))
 
         return (OrthoGRUCell(self.rnn_size),
                 OrthoGRUCell(self.rnn_size))

@@ -95,7 +95,9 @@ class GenericBanditTrainer(object):
 
             self.update_op = self.optimizer.apply_gradients(self.all_gradients)
 
-            print("Updating {}".format([var.name for grad, var in self.all_gradients]))
+            print("All vars: {}".format([(var.name, var.get_shape()) for var in tf.all_variables()]))
+
+            print("Updating: {}".format([var.name for grad, var in self.all_gradients]))
 
             # hack: partial run requires Tensor as output of operation
             with tf.control_dependencies([self.update_op]):

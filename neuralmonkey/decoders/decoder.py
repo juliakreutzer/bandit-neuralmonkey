@@ -471,20 +471,33 @@ class Decoder(ModelPart):
 
             voc_size = len(self.vocabulary)
 
-            noise_matrix = None
+            noise_matrix_gates = None
+            noise_matrix_candidate = None
             if order != 1:
                 with tf.variable_scope("GRUCell/Gates"):
                     tf.get_variable_scope().reuse_variables()
-                    mean, var = tf.nn.moments(tf.get_variable("Linear/Matrix",
-                                                              shape=[self.embedding_size + self.rnn_size, 2 * self.rnn_size]), axes=[0, 1])
+                    mean, var = tf.nn.moments(tf.get_variable("Linear/Matrix", validate_shape=False), axes=[0, 1])
 
-                noise_dist = tf.contrib.distributions.Normal(mu=mean, sigma=tf.sqrt(var))
-                noise_shape = [self.embedding_size+self.rnn_size, 2 * self.rnn_size]
-                # TODO better: add noise directly to W, then subtract
-                noise_matrix = tf.Variable(tf.zeros(noise_shape), trainable=False)
-                # only sample once per batch and use this noise for the whole sequence
-                noise_matrix = noise_matrix.assign(noise_dist.sample(noise_shape))
-                #noise_matrix = tf.nn.l2_normalize(noise_matrix, [0, 1])
+                    noise_dist = tf.contrib.distributions.Normal(mu=mean, sigma=tf.sqrt(var))
+                    noise_shape_gates = [self.embedding_size+self.rnn_size, 2 * self.rnn_size]
+                    # TODO better: add noise directly to W, then subtract
+                    noise_matrix_gates = tf.Variable(tf.zeros(noise_shape_gates), trainable=False)
+                    # only sample once per batch and use this noise for the whole sequence
+                    noise_matrix_gates = noise_matrix_gates.assign(noise_dist.sample(noise_shape_gates))
+                    #noise_matrix = tf.nn.l2_normalize(noise_matrix, [0, 1])
+
+                with tf.variable_scope("GRUCell/Candidate"):
+                    tf.get_variable_scope().reuse_variables()
+                    mean, var = tf.nn.moments(tf.get_variable("Linear/Matrix", validate_shape=False), axes=[0, 1])
+
+                    noise_dist = tf.contrib.distributions.Normal(mu=mean, sigma=tf.sqrt(var))
+                    noise_shape_candidate = [self.embedding_size+self.rnn_size, self.rnn_size]
+                    # TODO better: add noise directly to W, then subtract
+                    noise_matrix_candidate = tf.Variable(tf.zeros(noise_shape_candidate), trainable=False)
+                    # only sample once per batch and use this noise for the whole sequence
+                    noise_matrix_candidate = noise_matrix_candidate.assign(noise_dist.sample(noise_shape_candidate))
+
+            noise_matrix = noise_matrix_gates, noise_matrix_candidate
 
             for i, temp in zip(range(self.max_output_len + 1), temps):
                 if i > 0:
@@ -577,7 +590,7 @@ class Decoder(ModelPart):
 
                     # TODO feed same noise for whole batch and all timesteps
                     # if order is not 0, noise_matrix is None
-                    cell_output, state, gradient = \
+                    cell_output, state = \
                         cell(x, state, noise_recurrent=noise_matrix, delta=delta)
 
                     if store_rnn_states:
@@ -594,6 +607,15 @@ class Decoder(ModelPart):
                                             scope="AttnOutputProjection")
                         else:
                             output = cell_output
+
+                    if order == 0:
+                        # gradient is noise_matrix for recurrent matrix in decoder
+                        gradient = [(noise_matrix_gates,
+                                     tf.get_variable("GRUCell/Gates/Linear/Matrix", validate_shape=False)),
+                                    (noise_matrix_candidate,
+                                     tf.get_variable("GRUCell/Candidate/Linear/Matrix", validate_shape=False))]
+                    else:
+                        gradient = None
 
                 else:
                     raise NotImplementedError(
