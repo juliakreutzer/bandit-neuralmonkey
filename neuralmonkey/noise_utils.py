@@ -249,8 +249,8 @@ def noisy_dynamic_rnn_loop(cell,
         noise_matrix_gates = tf.Variable(tf.zeros(noise_shape_gates), name=direction+"_noise_gates",
                                    trainable=False)
         # only sample once per batch and use this noise for the whole sequence
-        noise_matrix_gates = noise_matrix_gates.assign(noise_dist.sample(noise_shape_gates))
-        # noise_matrix = tf.nn.l2_normalize(noise_matrix, [0, 1])
+        #noise_matrix_gates = noise_matrix_gates.assign(noise_dist.sample(noise_shape_gates))  # TODO uncomment if noise wanted
+        #noise_matrix_gates = tf.nn.l2_normalize(noise_matrix_gates, [0, 1])
 
         # for candidate
         noise_shape_candidate = [embedding_size + state_size, state_size]
@@ -258,8 +258,9 @@ def noisy_dynamic_rnn_loop(cell,
                                          name=direction + "_noise_candidate",
                                          trainable=False)
         # only sample once per batch and use this noise for the whole sequence
-        noise_matrix_candidate = noise_matrix_candidate.assign(
-            noise_dist.sample(noise_shape_candidate))
+        #noise_matrix_candidate = noise_matrix_candidate.assign(  # TODO uncomment if noise wanted
+        #    noise_dist.sample(noise_shape_candidate))
+        #noise_matrix_candidate = tf.nn.l2_normalize(noise_matrix_candidate, [0,1])
 
         noise_matrix = noise_matrix_gates, noise_matrix_candidate
 
