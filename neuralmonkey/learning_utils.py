@@ -503,7 +503,7 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
                                 i = 1
 
                                 # check whether position for negative sampling is before EOS
-                                if idx >= len(s2) or idx <= len(s2):
+                                if idx >= len(s2) or idx == -1:
                                     neg_word = "<outside>"
                                 else:
                                     neg_word = s2[idx]
