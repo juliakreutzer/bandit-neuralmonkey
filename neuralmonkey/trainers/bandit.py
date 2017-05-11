@@ -87,7 +87,7 @@ def dueling_objective(decoder, optimizer, delta=1.0) -> BanditObjective:
             0),
         1)
     decoded = tf.expand_dims(tf.pack(decoder.decoded), 2)
-    decoder.neg_sample_ix = [tf.constant(-1)]  # must be set for fetches
+    decoder.neg_sample_ix = tf.constant(-1)  # must be set for fetches
 
     # under w'
     sample_ids, sample_logprobs, sample_epsilon = _get_samples_gaussian(decoder,

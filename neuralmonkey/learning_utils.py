@@ -481,6 +481,10 @@ def bandit_training_loop(tf_manager: TensorFlowManager,
 
                         # evaluate every sentence pair separately
                         else:
+                            # for zero-order method whole sequence is perturbed
+                            if neg_sample_index == -1:
+                                neg_sample_index = len(desired_output)*[0]
+
                             for d, g, s1, s2, p1, p2, idx in zip(desired_output,
                                                             sentences_greedy,
                                                             pos_sentences, neg_sentences,
