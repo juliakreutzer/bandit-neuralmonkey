@@ -484,7 +484,9 @@ class Decoder(ModelPart):
                     noise_matrix_gates = tf.Variable(tf.zeros(noise_shape_gates), trainable=False)
                     # only sample once per batch and use this noise for the whole sequence
                     noise_matrix_gates = noise_matrix_gates.assign(noise_dist.sample(noise_shape_gates))
-                    #noise_matrix = tf.nn.l2_normalize(noise_matrix, [0, 1])
+                    #noise_matrix = tf.nn.l2_normalize(noise_matrix, [0, 1])  # l2 norm is 1.0
+                    # identity for tf bug: no dropout directly on variables
+                    noise_matrix_gates = dropout(tf.identity(noise_matrix_gates), self.dropout_keep_prob, self.train_mode)
 
                 with tf.variable_scope("GRUCell/Candidate"):
                     tf.get_variable_scope().reuse_variables()
@@ -496,6 +498,7 @@ class Decoder(ModelPart):
                     noise_matrix_candidate = tf.Variable(tf.zeros(noise_shape_candidate), trainable=False)
                     # only sample once per batch and use this noise for the whole sequence
                     noise_matrix_candidate = noise_matrix_candidate.assign(noise_dist.sample(noise_shape_candidate))
+                    noise_matrix_candidate = dropout(tf.identity(noise_matrix_candidate), self.dropout_keep_prob, self.train_mode)
 
             noise_matrix = noise_matrix_gates, noise_matrix_candidate
 
