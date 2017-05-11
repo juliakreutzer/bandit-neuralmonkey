@@ -83,7 +83,7 @@ def probit_loss_objective(decoder, optimizer, delta=1.0) -> BanditObjective:
 
     # get epsilons from encoder as well
     encoder = decoder.encoders[0]
-    sample_epsilon.extend(encoder.gradients)
+    #sample_epsilon.extend(encoder.gradients)
 
     # negated epsilon since gradient ascent -> negation of reward is left out
     print("Gradient {}".format(sample_epsilon))
