@@ -71,6 +71,42 @@ def expected_loss_objective(decoder, optimizer, initial_temperature) \
     )
 
 
+def dueling_objective(decoder, optimizer, delta=1.0) -> BanditObjective:
+    """ Dueling Bandit """
+    # sample unit vector u_t uniformly
+    # compute w' = w_t + delta*u_t
+    # decode under w, get feedback
+    # decoder under w', get feedback
+    # compute gradient: learning_rate*u_t*(reward(w) - reward(w'))
+
+    # under w
+    decoded_logprobs = tf.expand_dims(
+        tf.expand_dims(
+            tf.reduce_sum(
+                tf.pack(decoder.decoded_logprobs), [0]),
+            0),
+        1)
+    decoded = tf.expand_dims(tf.pack(decoder.decoded), 2)
+    decoder.neg_sample_ix = [tf.constant(-1)]  # must be set for fetches
+
+    # under w'
+    sample_ids, sample_logprobs, sample_epsilon = _get_samples_gaussian(decoder,
+                                                                        delta)
+
+    scaled_gradient = scale_gradients(sample_epsilon,
+                                      (tf.reduce_mean(decoder.rewards)
+                                       -decoder.baseline))
+
+    return BanditObjective(
+        name="{} - duel".format(decoder.name),
+        decoder=decoder,
+        samples=[decoded, sample_ids],
+        sample_logprobs=[decoded_logprobs, sample_logprobs],
+        loss=tf.reduce_mean(decoder.rewards, [0,1]),
+        gradients=scaled_gradient
+    )
+
+
 def probit_loss_objective(decoder, optimizer, delta=1.0) -> BanditObjective:
     """ Probit loss """
 
@@ -79,14 +115,13 @@ def probit_loss_objective(decoder, optimizer, delta=1.0) -> BanditObjective:
     # decode under w'
     sample_ids, sample_logprobs, sample_epsilon =_get_samples_gaussian(decoder, delta)
     # get feedback for sample
-    # compute gradient: learning_rate*-reward*epsilon (w/o backprop)
+    # compute gradient: learning_rate*reward*epsilon (w/o backprop)
 
     # get epsilons from encoder as well
-    encoder = decoder.encoders[0]
+    #encoder = decoder.encoders[0]
     #sample_epsilon.extend(encoder.gradients)
 
     # negated epsilon since gradient ascent -> negation of reward is left out
-    print("Gradient {}".format(sample_epsilon))
     scaled_gradients = scale_gradients(sample_epsilon,
                                        (tf.reduce_mean(decoder.rewards)
                                          -decoder.baseline))
@@ -443,10 +478,9 @@ class ExpectedLossTrainer(GenericBanditTrainer):
             binary_feedback=binary_feedback,
             store_gradients=store_gradients, baseline=baseline)
 
+
 class ProbitLossTrainer(GenericBanditTrainer):
     """ Probit objective """
-
-    # for now sampling in projection layer
 
     def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
                  l2_weight=0., initial_temperature=0., clip_norm=False,
@@ -462,6 +496,25 @@ class ProbitLossTrainer(GenericBanditTrainer):
             optimizer=optimizer, pairwise=False,
             binary_feedback=binary_feedback,
             store_gradients=store_gradients, baseline=baseline)
+
+
+class DuelingTrainer(GenericBanditTrainer):
+    """ Dueling bandits objective """
+    def __init__(self, decoders: List[Any], evaluator, l1_weight=0.,
+                 l2_weight=0., initial_temperature=0., clip_norm=False,
+                 optimizer=None, binary_feedback=False,
+                 store_gradients=False, delta=1.0,
+                 baseline=False, score_function=False) -> None:
+        self.store_gradients = store_gradients
+        objective = dueling_objective(decoders[0], optimizer, delta=delta)
+
+        super(DuelingTrainer, self).__init__(
+            objective, evaluator, l1_weight, l2_weight,
+            clip_norm=clip_norm,
+            optimizer=optimizer, pairwise=True,
+            binary_feedback=binary_feedback,
+            store_gradients=store_gradients, baseline=baseline)
+
 
 
 class CrossEntropyTrainer(GenericBanditTrainer):
