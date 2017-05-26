@@ -115,19 +115,19 @@ def main() -> None:
 
         print("")
 
-        evaluators = [(e[0], e[0], e[1]) if len(e) == 2 else e
-                      for e in CONFIG.model.evaluation]
+        #evaluators = [(e[0], e[0], e[1]) if len(e) == 2 else e
+        #              for e in CONFIG.model.evaluation]
 
         for dataset in datasets_model.test_datasets:
             execution_results, output_data = run_on_dataset(
                 CONFIG.model.tf_manager, CONFIG.model.runners,
                 dataset, CONFIG.model.postprocess, CONFIG.model.copypostprocess,
-                write_out=True)
+                write_out=True, batch_size=CONFIG.model.runners_batch_size)
             # TODO what if there is no ground truth
-            eval_result = evaluation(evaluators, dataset, CONFIG.model.runners,
-                                     execution_results, output_data)
-            if eval_result:
-                print_final_evaluation(dataset.name, eval_result)
+            #eval_result = evaluation(evaluators, dataset, CONFIG.model.runners,
+            #                         execution_results, output_data)
+            #if eval_result:
+            #    print_final_evaluation(dataset.name, eval_result)
 
     else:
 
