@@ -1029,13 +1029,13 @@ def run_on_dataset(tf_manager: TensorFlowManager,
             result_data[series_name] = postprocess(outputs)
 
     if copypostprocess is not None:
-        inputs = dataset.get_series("source")
+        if postprocess is not None:
+            inputs = dataset.get_series("source_bpe")
+        else:
+            inputs = dataset.get_series("source")
 
         for series_name, outputs in result_data.items():
-            #print("copypostprocessing")
-            #print("outputs {}".format(outputs))
             copypostprocessed = copypostprocess(inputs, outputs)
-            #print("post {}".format(copypostprocessed))
             result_data[series_name] = copypostprocessed
 
     if write_out:
