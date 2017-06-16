@@ -100,7 +100,9 @@ class TensorFlowManager(object):
 
         batch_results = [
             [] for _ in execution_scripts]  # type: List[List[ExecutionResult]]
+        batch_no = 0
         for batch in batched_dataset:
+            print(batch_no)
             executables = [s.get_executable(compute_losses=compute_losses,
                                             summaries=summaries)
                            for s in execution_scripts]
@@ -138,6 +140,7 @@ class TensorFlowManager(object):
 
             for script_list, executable in zip(batch_results, executables):
                 script_list.append(executable.result)
+            batch_no += 1
 
         collected_results = []  # type: List[ExecutionResult]
         for result_list in batch_results:

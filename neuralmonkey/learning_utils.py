@@ -1024,7 +1024,6 @@ def run_on_dataset(tf_manager: TensorFlowManager,
 
     result_data = {runner.output_series: result.outputs
                    for runner, result in zip(runners, all_results)}
-
     if postprocess is not None:
         for series_name, outputs in result_data.items():
             result_data[series_name] = postprocess(outputs)
@@ -1033,13 +1032,17 @@ def run_on_dataset(tf_manager: TensorFlowManager,
         inputs = dataset.get_series("source")
 
         for series_name, outputs in result_data.items():
-            # print("outputs {}".format(outputs))
+            #print("copypostprocessing")
+            #print("outputs {}".format(outputs))
             copypostprocessed = copypostprocess(inputs, outputs)
+            #print("post {}".format(copypostprocessed))
             result_data[series_name] = copypostprocessed
 
     if write_out:
         for series_id, data in result_data.items():
+            #print(series_id)
             if series_id in dataset.series_outputs:
+                print("writing out {}".format(series_id))
                 path = dataset.series_outputs[series_id]
                 if isinstance(data, np.ndarray):
                     np.save(path, data)

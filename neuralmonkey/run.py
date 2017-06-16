@@ -120,8 +120,8 @@ def main() -> None:
 
         for dataset in datasets_model.test_datasets:
             execution_results, output_data = run_on_dataset(
-                CONFIG.model.tf_manager, CONFIG.model.runners,
-                dataset, CONFIG.model.postprocess, CONFIG.model.copypostprocess,
+                tf_manager=CONFIG.model.tf_manager, runners=CONFIG.model.runners,
+                dataset=dataset, postprocess=CONFIG.model.postprocess, copypostprocess=CONFIG.model.copypostprocess,
                 write_out=True, batch_size=CONFIG.model.runners_batch_size)
             # TODO what if there is no ground truth
             #eval_result = evaluation(evaluators, dataset, CONFIG.model.runners,
