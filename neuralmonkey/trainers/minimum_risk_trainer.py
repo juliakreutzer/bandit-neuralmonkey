@@ -108,7 +108,6 @@ def expected_loss_objective(decoder: Decoder,
 
     samples_reward = []
     samples_logprobs = []
-    Z = tf.constant(0.0)
 
     # sample number_of_samples times, store logits, sample indices and rewards
     for sample_no in range(number_of_samples):
@@ -128,15 +127,14 @@ def expected_loss_objective(decoder: Decoder,
         # no masking here, since otherwise shorter sentences are preferred
         sent_logprobs = tf.reduce_sum(word_logprobs, axis=0)
 
-        sent_prob = tf.exp(sent_logprobs*temperature)
-        Z += sent_prob
-
         samples_reward.append(sample_reward)
-        samples_logprobs.append(sent_logprobs)
+        samples_logprobs.append(sent_logprobs*temperature)
 
     # TODO make operations numerically stable
-    renormalized_logprobs = [tf.log(tf.exp(logprob*temperature)/Z)
-                             for logprob in samples_logprobs]
+
+    # sum over samples for normalization
+    Z = tf.reduce_logsumexp(tf.stack(samples_logprobs, axis=0), axis=0)
+    renormalized_logprobs = [logprob - Z for logprob in samples_logprobs]
 
     renormalized_logprobs = tf.Print(renormalized_logprobs, [Z, samples_logprobs, renormalized_logprobs], "Z, sample logprobs, renormalized", summarize=10)
 
