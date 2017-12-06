@@ -128,14 +128,14 @@ def expected_loss_objective(decoder: Decoder,
         # no masking here, since otherwise shorter sentences are preferred
         sent_logprobs = tf.reduce_sum(word_logprobs, axis=0)
 
-        sent_prob = tf.exp(sent_logprobs)
-        Z += tf.pow(sent_prob, temperature)
+        sent_prob = tf.exp(sent_logprobs*temperature)
+        Z += sent_prob
 
         samples_reward.append(sample_reward)
         samples_logprobs.append(sent_logprobs)
 
-
-    renormalized_logprobs = [tf.log(tf.pow(tf.exp(logprob), temperature)/Z)
+    # TODO make operations numerically stable
+    renormalized_logprobs = [tf.log(tf.exp(logprob*temperature)/Z)
                              for logprob in samples_logprobs]
 
     renormalized_logprobs = tf.Print(renormalized_logprobs, [Z, samples_logprobs, renormalized_logprobs], "Z, sample logprobs, renormalized", summarize=10)
@@ -153,6 +153,9 @@ def expected_loss_objective(decoder: Decoder,
 
     # average over samples
     total_loss /= tf.to_float(number_of_samples)
+
+    # TODO smooth with xent
+
     # average over batch
     batch_loss = tf.reduce_mean(total_loss)
     batch_loss = tf.Print(batch_loss, [batch_loss], "batch_loss")
