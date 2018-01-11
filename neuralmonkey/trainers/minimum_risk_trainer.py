@@ -1,6 +1,6 @@
 """Training objective for expected loss training."""
 
-from typing import Callable
+from typing import Callable, NamedTuple, Any
 
 import numpy as np
 import tensorflow as tf
@@ -15,52 +15,12 @@ from neuralmonkey.vocabulary import END_TOKEN, PAD_TOKEN
 RewardFunction = Callable[[np.ndarray, np.ndarray], np.ndarray]
 # pylint: enable=invalid-name
 
-
-def reinforce_score(reward: tf.Tensor,
-                    baseline: tf.Tensor,
-                    decoded: tf.Tensor,
-                    logits: tf.Tensor) -> tf.Tensor:
-    """Cost function whose derivative is the REINFORCE equation.
-
-    This implements the primitive function to the central equation of the
-    REINFORCE algorithm that estimates the gradients of the loss with respect
-    to decoder logits.
-
-    The second term of the product is the derivative of the log likelihood of
-    the decoded word. The reward function and the optional baseline are however
-    treated as a constant, so they influence the derivate
-    only multiplicatively.
-
-    :param reward: reward for the selected sample
-    :param baseline: baseline to subtract from the reward
-    :param decoded: token indices for sampled translation
-    :param logits: logits for sampled translation
-    :param mask: 1 if inside sentence, 0 if outside
-    :return:
-    """
-    # shape (batch)
-    if baseline is not None:
-        reward -= baseline
-
-    # runtime probabilities, shape (time, batch, vocab)
-    # pylint: disable=invalid-unary-operand-type
-    word_logprobs = -tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=decoded, logits=logits)
-
-    # sum word log prob to sentence log prob
-    # no masking here, since otherwise shorter sentences are preferred
-    sent_logprobs = tf.reduce_sum(word_logprobs, axis=0)
-
-    # REINFORCE gradient, shape (batch)
-    score = tf.stop_gradient(tf.negative(reward)) * sent_logprobs
-    return score
-
-
 def expected_loss_objective(decoder: Decoder,
                             reward_function: RewardFunction,
                             number_of_samples: int = 5,
                             ce_smoothing: float = 0.,
-                            temperature: float = 1.) -> Objective:
+                            alpha: float = 1.,
+                            control_variate: str = None) -> Objective:
     """Minimum Risk Training with approximation over a sampled subspace
 
     'Minimum Risk Training for Neural Machine Translation'
@@ -68,6 +28,9 @@ def expected_loss_objective(decoder: Decoder,
 
     :param decoder: a recurrent decoder to sample from
     :param reward_function: any evaluator object
+    :param number_of_samples: number of samples for gradient approximation
+    :param ce_smoothing: factor to smooth cross-entropy loss with
+    :param alpha: determines the shape of the distribution, high: peaked
     :return: Objective object to be used in generic trainer
     """
     check_argument_types()
@@ -106,13 +69,14 @@ def expected_loss_objective(decoder: Decoder,
             rewards.append(reward)
         return np.array(rewards, dtype=np.float32)
 
-    samples_reward = []
-    samples_logprobs = []
+    # create empty TAs
+    rewards=tf.TensorArray(dtype=tf.float32, size=number_of_samples, name="sample_rewards")
+    logprobs=tf.TensorArray(dtype=tf.float32, size=number_of_samples, name="sample_logprobs")
 
-    # sample number_of_samples times, store logits, sample indices and rewards
-    for sample_no in range(number_of_samples):
-        # decoded, shape (time, batch)
-        sample_loop_result = decoder.decoding_loop(train_mode=False, sample=True)
+    def body(index, rewards, logprobs) -> (int, tf.TensorArray, tf.TensorArray):
+
+        sample_loop_result = decoder.decoding_loop(train_mode=False,
+                                                   sample=True)
         sample_logits = sample_loop_result[0]
         sample_decoded = sample_loop_result[3]
 
@@ -127,36 +91,41 @@ def expected_loss_objective(decoder: Decoder,
         # no masking here, since otherwise shorter sentences are preferred
         sent_logprobs = tf.reduce_sum(word_logprobs, axis=0)
 
-        samples_reward.append(sample_reward)
-        samples_logprobs.append(sent_logprobs*temperature)
+        return (index+1,
+                rewards.write(index, sample_reward),
+                logprobs.write(index, sent_logprobs))
 
-    # TODO make operations numerically stable
+    condition = lambda i, r, p: i < number_of_samples
+    _, final_rewards, final_logprobs = tf.while_loop(condition, body, (0, rewards, logprobs))
 
-    # sum over samples for normalization
-    Z = tf.reduce_logsumexp(tf.stack(samples_logprobs, axis=0), axis=0)
-    renormalized_logprobs = [logprob - Z for logprob in samples_logprobs]
+    samples_logprobs = final_logprobs.stack()  # samples, batch
+    samples_reward = final_rewards.stack()  # samples, batch
 
-    renormalized_logprobs = tf.Print(renormalized_logprobs, [Z, samples_logprobs, renormalized_logprobs], "Z, sample logprobs, renormalized", summarize=10)
+    # if specified, compute the average reward baseline
+    baseline = None
 
-    total_loss = tf.zeros((decoder.batch_size,))
-    # iterate over samples again to compute loss
-    for sample_no in range(number_of_samples):
+    reward_counter = tf.Variable(0.0, trainable=False,
+                                 name="reward_counter")
+    reward_sum = tf.Variable(0.0, trainable=False, name="reward_sum")
 
-        # REINFORCE gradient, shape (batch)
-        score = tf.stop_gradient(tf.negative(samples_reward[sample_no])) * \
-                renormalized_logprobs[sample_no]
+    if control_variate == "baseline":
+        # increment the cumulative reward in the decoder
+        reward_counter = tf.assign_add(reward_counter,
+                                       tf.to_float(decoder.batch_size))
+        # sum over batch, mean over samples
+        reward_sum = tf.assign_add(reward_sum, tf.reduce_sum(tf.reduce_mean(samples_reward, axis=0)))
+        baseline = tf.div(reward_sum,
+                          tf.maximum(reward_counter, 1.0))
+        samples_reward -= baseline
 
-        # vector of batch length
-        total_loss += score
-
-    # average over samples
-    total_loss /= tf.to_float(number_of_samples)
-
-    # TODO smooth with xent
+    renormalized_probs = tf.nn.softmax(samples_logprobs * alpha, dim=0)  # softmax over sample space
+    scored_probs = -samples_reward * renormalized_probs
+    total_loss = tf.reduce_sum(scored_probs, axis=0)
 
     # average over batch
     batch_loss = tf.reduce_mean(total_loss)
-    batch_loss = tf.Print(batch_loss, [batch_loss], "batch_loss")
+    if ce_smoothing > 0.0:
+        batch_loss += tf.multiply(ce_smoothing, decoder.cost)
 
     tf.summary.scalar(
         "train_{}/self_mrt_cost".format(decoder.data_id),
