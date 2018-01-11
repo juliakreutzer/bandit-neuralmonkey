@@ -125,7 +125,7 @@ class RecurrentEncoder(ModelPart, TemporalStatefulWithOutput):
         return(RNN_CELL_TYPES[self.rnn_cell_str](self.rnn_size),
                RNN_CELL_TYPES[self.rnn_cell_str](self.rnn_size))
 
-    def feed_dict(self, dataset: Dataset, train: bool = False) -> FeedDict:
+    def feed_dict(self, dataset: Dataset, train: bool = False, feedback=False) -> FeedDict:
         fd = self.input_sequence.feed_dict(dataset, train)
         fd[self.train_mode] = train
 

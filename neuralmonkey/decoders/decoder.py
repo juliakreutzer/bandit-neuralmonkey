@@ -211,6 +211,10 @@ class Decoder(ModelPart):
         return tf.placeholder(tf.int32, [None, None], name="train_inputs")
 
     @tensor
+    def train_rewards(self) -> tf.Tensor:
+        return tf.placeholder(tf.float32, [None], name="train_rewards")
+
+    @tensor
     def train_padding(self) -> tf.Tensor:
         # NOTE transposed shape (time, batch)
         # rename padding to mask
@@ -568,7 +572,8 @@ class Decoder(ModelPart):
 
         return logits, rnn_outputs, mask, decoded
 
-    def feed_dict(self, dataset: Dataset, train: bool = False) -> FeedDict:
+    def feed_dict(self, dataset: Dataset, train: bool = False,
+                  feedback: bool = False) -> FeedDict:
         """Populate the feed dictionary for the decoder object.
 
         Arguments:
@@ -600,5 +605,10 @@ class Decoder(ModelPart):
 
             fd[self.train_inputs] = inputs
             fd[self.train_padding] = weights
+
+            if feedback:
+                rewards = list(dataset.get_series("reward", allow_none=False))
+                fd[self.train_rewards] = [float(r[0]) for r in rewards]
+
 
         return fd

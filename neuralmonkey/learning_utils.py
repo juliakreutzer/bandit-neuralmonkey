@@ -50,7 +50,8 @@ def training_loop(tf_manager: TensorFlowManager,
                   train_start_offset: int = 0,
                   runners_batch_size: Optional[int] = None,
                   initial_variables: Optional[Union[str, List[str]]] = None,
-                  postprocess: Postprocess = None) -> None:
+                  postprocess: Postprocess = None,
+                  feedback=False) -> None:
     """Execute the training loop for given graph and data.
 
     Args:
@@ -174,7 +175,7 @@ def training_loop(tf_manager: TensorFlowManager,
                                     last_log_time, log_period_time):
                     trainer_result = tf_manager.execute(
                         batch_dataset, [trainer], train=True,
-                        summaries=True)
+                        summaries=True, feedback=feedback)
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
                         postprocess, write_out=False,
@@ -193,7 +194,7 @@ def training_loop(tf_manager: TensorFlowManager,
                     last_log_time = time.process_time()
                 else:
                     tf_manager.execute(batch_dataset, [trainer],
-                                       train=True, summaries=False)
+                                       train=True, summaries=False, feedback=feedback)
 
                 if _is_logging_time(step, val_period_batch,
                                     last_val_time, val_period_time):

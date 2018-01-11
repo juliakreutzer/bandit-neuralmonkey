@@ -123,7 +123,7 @@ class BaseAttention(ModelPart):
     def finalize_loop(self, key: str, last_loop_state: Any) -> None:
         raise NotImplementedError("Abstract method")
 
-    def feed_dict(self, dataset: Dataset, train: bool = False) -> FeedDict:
+    def feed_dict(self, dataset: Dataset, train: bool = False, feedback=False) -> FeedDict:
         return {self.train_mode: train}
 
     @property

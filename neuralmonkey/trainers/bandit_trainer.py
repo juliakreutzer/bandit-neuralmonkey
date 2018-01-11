@@ -153,3 +153,47 @@ def expected_loss_objective(decoder: Decoder,
         gradients=None,
         weight=None
     )
+
+
+def dpm_objective(decoder:Decoder, control_variate: str=None) -> Objective:
+    """ Deterministic Propensity Matching
+
+    See: http://www.aclweb.org/anthology/D/D17/D17-1272.pdf
+
+    control variates: reweighting and baseline
+    """
+
+    check_argument_types()
+
+    # logged translation
+    hypothesis = decoder.train_inputs  # time, batch
+
+    # TODO might normalize by length
+    hyp_logprobs = -tf.contrib.seq2seq.sequence_loss(
+        tf.transpose(decoder.train_logits, perm=[1,0,2]),  # batch length voc -> before: length, batch, voc
+        tf.transpose(hypothesis), tf.transpose(decoder.train_padding),
+        average_across_batch=False, average_across_timesteps=True) # shape afterwards -> batch
+    hyp_logprobs = tf.Print(hyp_logprobs, [hyp_logprobs], "logprobs", summarize=10)
+
+    # weigh model probabilities by reward
+    rewards = decoder.train_rewards
+    rewards = tf.Print(rewards, [rewards], "rewards", summarize=10)
+
+    hyp_probs = tf.exp(hyp_logprobs)
+    hyp_probs = tf.Print(hyp_probs, [hyp_probs], "probs", summarize=10)
+
+    if control_variate == "reweighting":
+        hyp_probs /= tf.reduce_sum(hyp_probs)
+
+    loss = tf.reduce_sum(-rewards*hyp_probs)
+
+    loss = tf.Print(loss, [loss], "loss", summarize=10)
+
+    return Objective(
+        name="{}_dpm".format(decoder.name),
+        decoder=decoder,
+        loss=loss,
+        gradients=None,
+        weight=None
+    )
+

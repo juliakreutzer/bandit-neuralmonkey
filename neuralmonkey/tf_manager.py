@@ -172,7 +172,8 @@ class TensorFlowManager(object):
                 compute_losses=True,
                 summaries=True,
                 batch_size=None,
-                log_progress: int = 0) -> List[ExecutionResult]:
+                log_progress: int = 0,
+                feedback=False) -> List[ExecutionResult]:
         if batch_size is None:
             batch_size = len(dataset)
         batched_dataset = dataset.batch_dataset(batch_size)
@@ -206,7 +207,7 @@ class TensorFlowManager(object):
                     else:
                         tensor_list_lengths.append(0)
 
-                feed_dict = _feed_dicts(batch, all_feedables, train=train)
+                feed_dict = _feed_dicts(batch, all_feedables, train=train, feedback=feedback)
                 for fdict in additional_feed_dicts:
                     feed_dict.update(fdict)
 
@@ -273,7 +274,7 @@ class TensorFlowManager(object):
             self.save(self.variables_files[0])
 
 
-def _feed_dicts(dataset, coders, train=False):
+def _feed_dicts(dataset, coders, train=False, feedback=False):
     """Feed the coders with data from dataset.
 
     This function ensures all encoder and decoder objects feed their the data
@@ -282,6 +283,6 @@ def _feed_dicts(dataset, coders, train=False):
     res = {}
 
     for coder in coders:
-        res.update(coder.feed_dict(dataset, train=train))
+        res.update(coder.feed_dict(dataset, train=train, feedback=feedback))
 
     return res
