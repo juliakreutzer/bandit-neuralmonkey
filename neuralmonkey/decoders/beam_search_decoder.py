@@ -309,7 +309,7 @@ class BeamSearchDecoder(ModelPart):
 
         return body
 
-    def feed_dict(self, dataset: Dataset, train: bool = False) -> FeedDict:
+    def feed_dict(self, dataset: Dataset, train: bool = False, feedback=False) -> FeedDict:
         """Populate the feed dictionary for the decoder object.
 
         Arguments:
