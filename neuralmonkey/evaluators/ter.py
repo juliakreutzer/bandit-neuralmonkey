@@ -5,8 +5,9 @@ import pyter
 class TEREvaluator(object):
     """Compute TER using the pyter library."""
 
-    def __init__(self, name: str = "TER") -> None:
+    def __init__(self, name: str = "TER", negate: bool = False) -> None:
         self.name = name
+        self.negate = negate
 
     def __call__(self, decoded, references) -> float:
         ter_sum = 0.
@@ -19,7 +20,10 @@ class TEREvaluator(object):
                 ter_sum += 0.
             else:
                 ter_sum += 1.
-        return ter_sum / count
+        if not self.negate:
+            return ter_sum / count
+        else:
+            return (1-ter_sum) / count
 
 
 TER = TEREvaluator()
