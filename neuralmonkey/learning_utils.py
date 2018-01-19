@@ -399,7 +399,7 @@ def run_on_dataset(tf_manager: TensorFlowManager,
     all_results = tf_manager.execute(dataset, runners,
                                      compute_losses=contains_targets,
                                      batch_size=batch_size,
-                                     log_progress=log_progress)
+                                     log_progress=log_progress, feedback=False)
 
     result_data = {runner.output_series: result.outputs
                    for runner, result in zip(runners, all_results)}

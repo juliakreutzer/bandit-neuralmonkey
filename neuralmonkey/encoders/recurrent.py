@@ -157,6 +157,7 @@ class SentenceEncoder(RecurrentEncoder):
         # best way could be to enter the data_id parameter manually to the
         # representation runner
         self.data_id = data_id
+        self.vocabulary = vocabulary
 
         input_sequence = EmbeddedSequence(
             name="{}_input".format(name),
