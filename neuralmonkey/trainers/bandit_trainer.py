@@ -62,7 +62,8 @@ def expected_loss_objective(decoder: Decoder,
                             reward_function: RewardFunction,
                             control_variate: str = None,
                             simulate_from_ref: bool = True,
-                            service_url: str=None) -> Objective:
+                            service_url: str=None,
+                            temperature: float=1.0) -> Objective:
     """Construct Expected Loss objective for training with bandit feedback.
 
     'Bandit Structured Prediction for Neural Sequence-to-Sequence Learning'
@@ -77,7 +78,7 @@ def expected_loss_objective(decoder: Decoder,
 
     # decoded, shape (time, batch)
     # pylint: disable=protected-access
-    sample_loop_result = decoder._decoding_loop(train_mode=False, sample=True)
+    sample_loop_result = decoder._decoding_loop(train_mode=False, sample=True, temperature=temperature)
     sample_logits = sample_loop_result[0]
     sample_decoded = sample_loop_result[3]
 
@@ -181,7 +182,7 @@ def expected_loss_objective(decoder: Decoder,
 
     # REINFORCE score: shape (time, batch, vocab)
     sent_loss = reinforce_score(
-        sample_reward, baseline, sample_decoded, sample_logits)
+        sample_reward, baseline, sample_decoded, sample_logits/temperature)
 
     batch_loss = tf.reduce_mean(sent_loss)
 

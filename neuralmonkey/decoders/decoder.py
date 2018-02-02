@@ -397,7 +397,8 @@ class Decoder(ModelPart):
 
     def get_body(self,
                  train_mode: bool,
-                 sample: bool = False) -> Callable:
+                 sample: bool = False,
+                 temperature: float = 1.0) -> Callable:
         # pylint: disable=too-many-branches
         def body(*args) -> LoopState:
             loop_state = LoopState(*args)
@@ -463,7 +464,7 @@ class Decoder(ModelPart):
 
             if sample:
                 next_symbols = tf.to_int32(
-                    tf.squeeze(tf.multinomial(logits, num_samples=1), axis=1))
+                    tf.squeeze(tf.multinomial(logits/temperature, num_samples=1), axis=1))
             elif train_mode:
                 next_symbols = loop_state.train_inputs[step]
             else:
@@ -544,12 +545,12 @@ class Decoder(ModelPart):
                                  self.max_output_len)
         return tf.logical_and(not_all_done, before_max_len)
 
-    def _decoding_loop(self, train_mode: bool, sample: bool = False)-> Tuple[
+    def _decoding_loop(self, train_mode: bool, sample: bool = False, temperature: float = 1.0)-> Tuple[
             tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
 
         final_loop_state = tf.while_loop(
             self.loop_continue_criterion,
-            self.get_body(train_mode, sample),
+            self.get_body(train_mode, sample, temperature),
             self.get_initial_loop_state())
 
         for att_state, attn_obj in zip(
