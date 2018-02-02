@@ -10,6 +10,8 @@ from neuralmonkey.trainers.generic_trainer import Objective
 from neuralmonkey.decoders.decoder import Decoder
 from neuralmonkey.vocabulary import END_TOKEN, PAD_TOKEN
 
+import requests
+import json
 
 # pylint: disable=invalid-name
 RewardFunction = Callable[[np.ndarray, np.ndarray], np.ndarray]
@@ -20,7 +22,9 @@ def expected_loss_objective(decoder: Decoder,
                             number_of_samples: int = 5,
                             ce_smoothing: float = 0.,
                             alpha: float = 1.,
-                            control_variate: str = None) -> Objective:
+                            control_variate: str = None,
+                            simulate_from_ref: bool = True,
+                            service_url: str = None) -> Objective:
     """Minimum Risk Training with approximation over a sampled subspace
 
     'Minimum Risk Training for Neural Machine Translation'
@@ -69,6 +73,41 @@ def expected_loss_objective(decoder: Decoder,
             rewards.append(reward)
         return np.array(rewards, dtype=np.float32)
 
+    def _get_reward_from_service(sources: np.array, hypotheses: np.array) -> np.array:
+        """Request the reward for a (time, batch) array from service.
+
+        :param sources: array of indices of sources, shape (time, batch)
+        :param hypotheses: array of indices of hypotheses, shape (time, batch)
+        :return: an array of batch length with float rewards
+        """
+        request_inputs = []
+        for srcs, hyps in zip(sources.transpose(), hypotheses.transpose()):
+            hyp_seq = []
+            src_seq = []
+            for h_token in hyps:
+                token = decoder.vocabulary.index_to_word[h_token]
+                if token == END_TOKEN or token == PAD_TOKEN:
+                    break
+                hyp_seq.append(token)
+            for s_token in srcs:
+                token = decoder.encoders[0].vocabulary.index_to_word[s_token]
+                if token == END_TOKEN or token == PAD_TOKEN:
+                    break
+                src_seq.append(token)
+            request_inputs.append((" ".join(src_seq), " ".join(hyp_seq)))
+        # request feedback
+        url = service_url
+        data = {"inputs": request_inputs}
+        headers = {'content-type': 'application/json'}
+
+        response = requests.post(url, data=json.dumps(data),
+                                 headers=headers)
+
+        response_dict = response.content.decode()
+        rewards = [float(r) for r in
+                   json.JSONDecoder().decode(response_dict)["predictions"]]
+        return np.array(rewards, dtype=np.float32)
+
     # create empty TAs
     rewards=tf.TensorArray(dtype=tf.float32, size=number_of_samples, name="sample_rewards")
     logprobs=tf.TensorArray(dtype=tf.float32, size=number_of_samples, name="sample_logprobs")
@@ -81,8 +120,15 @@ def expected_loss_objective(decoder: Decoder,
         sample_decoded = sample_loop_result[3]
 
         # rewards, shape (batch)
-        sample_reward = tf.py_func(_score_with_reward_function,
-                                   [reference, sample_decoded], tf.float32)
+        if simulate_from_ref:
+            # simulate from reference
+            sample_reward = tf.py_func(_score_with_reward_function,
+                                       [reference, sample_decoded], tf.float32)
+        else:
+            # retrieve from reward estimator model
+            sample_sources = tf.transpose(
+                decoder.encoders[0].input_sequence.inputs)
+            sample_reward = tf.py_func(_get_reward_from_service, [sample_sources, sample_decoded], tf.float32)
 
         word_logprobs = -tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=sample_decoded, logits=sample_logits)

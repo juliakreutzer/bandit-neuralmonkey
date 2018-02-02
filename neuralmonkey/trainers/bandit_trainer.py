@@ -62,8 +62,8 @@ def expected_loss_objective(decoder: Decoder,
                             reward_function: RewardFunction,
                             control_variate: str = None,
                             simulate_from_ref: bool = True,
-                            service_url: str=None,
-                            temperature: float=1.0) -> Objective:
+                            service_url: str = None,
+                            temperature: float = 1.0) -> Objective:
     """Construct Expected Loss objective for training with bandit feedback.
 
     'Bandit Structured Prediction for Neural Sequence-to-Sequence Learning'
@@ -200,7 +200,7 @@ def expected_loss_objective(decoder: Decoder,
     )
 
 
-def dc_objective(decoder: Decoder,
+def dc_objective(decoder: Decoder, number_of_samples: int=5,
                             control_variate: str = None,
                             service_url: str=None) -> Objective:
     """ Doubly Controlled Objective
@@ -231,10 +231,10 @@ def dc_objective(decoder: Decoder,
 
     # weigh model probabilities by reward
     rewards = decoder.train_rewards
-    rewards = tf.Print(rewards, [rewards], "rewards", summarize=10)
+    #rewards = tf.Print(rewards, [rewards], "logged rewards", summarize=10)
 
     hyp_probs = tf.exp(hyp_logprobs)
-    hyp_probs = tf.Print(hyp_probs, [hyp_probs], "probs", summarize=10)
+    #hyp_probs = tf.Print(hyp_probs, [hyp_probs], "probs", summarize=10)
 
     if control_variate == "reweighting":
         hyp_probs /= tf.reduce_sum(hyp_probs)
@@ -278,13 +278,70 @@ def dc_objective(decoder: Decoder,
     sample_sources = tf.transpose(decoder.encoders[0].input_sequence.inputs)
     estimated_rewards = tf.py_func(_get_reward_from_service,
                                    [sample_sources, hypothesis], tf.float32)
+    #estimated_rewards = tf.Print(estimated_rewards, [estimated_rewards], "estimated rewards", summarize=10)
 
     # (logged reward - estimated reward(logged))*prob(logged)
         # + SUM prob(sampled)*estimated reward(sampled)
     part1 = (rewards-estimated_rewards)*hyp_probs
 
-    # sample k translations
-    # TODO
+    # sample k translations and score with reward estimator
+
+    # create empty TAs
+    sampled_rewards = tf.TensorArray(dtype=tf.float32, size=number_of_samples,
+                             name="sampled_rewards")
+    sampled_logprobs = tf.TensorArray(dtype=tf.float32, size=number_of_samples,
+                              name="sampled_logprobs")
+
+    def body(index, rewards, logprobs) -> (int, tf.TensorArray, tf.TensorArray):
+
+        sample_loop_result = decoder._decoding_loop(train_mode=False,
+                                                    sample=True)
+        sample_logits = sample_loop_result[0]
+        sample_decoded = sample_loop_result[3]
+
+        # rewards, shape (batch)
+        sample_reward = tf.py_func(_get_reward_from_service,
+                                   [sample_sources, sample_decoded], tf.float32)
+
+        word_logprobs = -tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=sample_decoded, logits=sample_logits)
+
+        # sum word log prob to sentence log prob
+        # no masking here, since otherwise shorter sentences are preferred
+        sent_logprobs = tf.reduce_sum(word_logprobs, axis=0)
+
+        return (index + 1,
+                rewards.write(index, sample_reward),
+                logprobs.write(index, sent_logprobs))
+
+    condition = lambda i, r, p: i < number_of_samples
+    _, final_rewards, final_logprobs = tf.while_loop(condition, body,
+                                                     (0, sampled_rewards, sampled_logprobs))
+
+    samples_logprobs = final_logprobs.stack()  # samples, batch
+    samples_reward = final_rewards.stack()  # samples, batch
+    samples_probs = tf.exp(samples_logprobs)
+    samples_probs = tf.Print(samples_probs, [samples_probs], "samples_probs", summarize=10)
+    samples_reward = tf.Print(samples_reward, [samples_reward], "samples_rewards", summarize=10)
+
+    # TODO also reweight probs of samples over batch or sample space? otherwise part2 is very small
+    scored_probs = samples_reward * samples_probs
+    part2 = tf.reduce_sum(scored_probs, axis=0)
+
+    #part1 = tf.Print(part1, [part1], "part1", summarize=10)
+    #part2 = tf.Print(part2, [part2], "part2", summarize=10)
+
+    loss = tf.reduce_sum(-(part1+part2), axis=0)
+
+    #loss = tf.Print(loss, [loss], "loss", summarize=10)
+
+    return Objective(
+            name="{}_dc".format(decoder.name),
+            decoder=decoder,
+            loss=loss,
+            gradients=None,
+            weight=None
+    )
 
 def dpm_objective(decoder:Decoder, control_variate: str=None) -> Objective:
     """ Deterministic Propensity Matching
