@@ -199,6 +199,92 @@ def expected_loss_objective(decoder: Decoder,
     )
 
 
+def dc_objective(decoder: Decoder,
+                            control_variate: str = None,
+                            service_url: str=None) -> Objective:
+    """ Doubly Controlled Objective
+
+    See: http://www.aclweb.org/anthology/D/D17/D17-1272.pdf
+
+    control variates: reweighting and baseline
+
+    :param decoder:
+    :param control_variate:
+    :return:
+    """
+
+    check_argument_types()
+
+    # logged translation
+    hypothesis = decoder.train_inputs  # time, batch
+
+    # TODO might normalize by length
+    hyp_logprobs = -tf.contrib.seq2seq.sequence_loss(
+        tf.transpose(decoder.train_logits, perm=[1, 0, 2]),
+        # batch length voc -> before: length, batch, voc
+        tf.transpose(hypothesis), tf.transpose(decoder.train_padding),
+        average_across_batch=False,
+        average_across_timesteps=True)  # shape afterwards -> batch
+    hyp_logprobs = tf.Print(hyp_logprobs, [hyp_logprobs], "logprobs",
+                            summarize=10)
+
+    # weigh model probabilities by reward
+    rewards = decoder.train_rewards
+    rewards = tf.Print(rewards, [rewards], "rewards", summarize=10)
+
+    hyp_probs = tf.exp(hyp_logprobs)
+    hyp_probs = tf.Print(hyp_probs, [hyp_probs], "probs", summarize=10)
+
+    if control_variate == "reweighting":
+        hyp_probs /= tf.reduce_sum(hyp_probs)
+        # TODO baseline?
+
+    def _get_reward_from_service(sources: np.array, hypotheses: np.array) -> np.array:
+        """Request the reward for a (time, batch) array from service.
+
+        :param sources: array of indices of sources, shape (time, batch)
+        :param hypotheses: array of indices of hypotheses, shape (time, batch)
+        :return: an array of batch length with float rewards
+        """
+        request_inputs = []
+        for srcs, hyps in zip(sources.transpose(), hypotheses.transpose()):
+            hyp_seq = []
+            src_seq = []
+            for h_token in hyps:
+                token = decoder.vocabulary.index_to_word[h_token]
+                if token == END_TOKEN or token == PAD_TOKEN:
+                    break
+                hyp_seq.append(token)
+            for s_token in srcs:
+                token = decoder.encoders[0].vocabulary.index_to_word[s_token]
+                if token == END_TOKEN or token == PAD_TOKEN:
+                    break
+                src_seq.append(token)
+            request_inputs.append((" ".join(src_seq), " ".join(hyp_seq)))
+        # request feedback
+        url = service_url
+        data = {"inputs": request_inputs}
+        headers = {'content-type': 'application/json'}
+
+        response = requests.post(url, data=json.dumps(data),
+                                 headers=headers)
+
+        response_dict = response.content.decode()
+        rewards = [float(r) for r in json.JSONDecoder().decode(response_dict)["predictions"]]
+        return np.array(rewards, dtype=np.float32)
+
+
+    sample_sources = tf.transpose(decoder.encoders[0].input_sequence.inputs)
+    estimated_rewards = tf.py_func(_get_reward_from_service,
+                                   [sample_sources, hypothesis], tf.float32)
+
+    # (logged reward - estimated reward(logged))*prob(logged)
+        # + SUM prob(sampled)*estimated reward(sampled)
+    part1 = (rewards-estimated_rewards)*hyp_probs
+
+    # sample k translations
+    # TODO
+
 def dpm_objective(decoder:Decoder, control_variate: str=None) -> Objective:
     """ Deterministic Propensity Matching
 
