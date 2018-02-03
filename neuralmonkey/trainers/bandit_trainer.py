@@ -238,7 +238,7 @@ def dc_objective(decoder: Decoder, number_of_samples: int=5,
 
     if control_variate == "reweighting":
         hyp_probs /= tf.reduce_sum(hyp_probs)
-        # TODO baseline?
+        # TODO baseline? & ebay version
 
     def _get_reward_from_service(sources: np.array, hypotheses: np.array) -> np.array:
         """Request the reward for a (time, batch) array from service.
@@ -324,7 +324,8 @@ def dc_objective(decoder: Decoder, number_of_samples: int=5,
     samples_probs = tf.Print(samples_probs, [samples_probs], "samples_probs", summarize=10)
     samples_reward = tf.Print(samples_reward, [samples_reward], "samples_rewards", summarize=10)
 
-    # TODO also reweight probs of samples over batch or sample space? otherwise part2 is very small
+    #also reweight probs of samples over batch
+    samples_probs /= tf.reduce_sum(samples_probs,1)
     scored_probs = samples_reward * samples_probs
     part2 = tf.reduce_sum(scored_probs, axis=0)
 
