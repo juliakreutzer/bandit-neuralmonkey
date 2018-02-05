@@ -280,9 +280,26 @@ def dc_objective(decoder: Decoder, number_of_samples: int=5,
                                    [sample_sources, hypothesis], tf.float32)
     #estimated_rewards = tf.Print(estimated_rewards, [estimated_rewards], "estimated rewards", summarize=10)
 
+    # compute the average reward baseline for logged rewards
+    reward_counter_logged = tf.Variable(0.0, trainable=False,
+                                 name="reward_counter_logged")
+    reward_sum_logged = tf.Variable(0.0, trainable=False, name="reward_sum_logged")
+
+    # increment the cumulative reward in the decoder
+    reward_counter_logged = tf.assign_add(reward_counter_logged,
+                                       tf.to_float(decoder.batch_size))
+    # sum over batch, mean over samples
+    reward_sum_logged = tf.assign_add(reward_sum_logged, tf.reduce_sum(
+        tf.reduce_mean(rewards, axis=0)))
+    baseline = tf.div(reward_sum_logged, tf.maximum(reward_counter_logged, 1.0))
+
+
     # (logged reward - estimated reward(logged))*prob(logged)
-        # + SUM prob(sampled)*estimated reward(sampled)
-    part1 = (rewards-estimated_rewards)*hyp_probs
+    # + SUM prob(sampled)*estimated reward(sampled)
+
+    #part1 = (rewards-estimated_rewards)*hyp_probs
+    # NAACL version: subtract avg logged reward from logged reward
+    part1 = (rewards-baseline)*hyp_probs
 
     # sample k translations and score with reward estimator
 
@@ -325,9 +342,26 @@ def dc_objective(decoder: Decoder, number_of_samples: int=5,
     samples_reward = tf.Print(samples_reward, [samples_reward], "samples_rewards", summarize=10)
 
     #also reweight probs of samples over batch
-    samples_probs /= tf.reduce_sum(samples_probs,1)
-    scored_probs = samples_reward * samples_probs
-    part2 = tf.reduce_sum(scored_probs, axis=0)
+    #samples_probs /= tf.reduce_sum(samples_probs,1)
+    #scored_probs = samples_reward * samples_probs
+    #part2 = tf.reduce_sum(scored_probs, axis=0)
+
+    # compute the average reward baseline for estimated rewards
+    reward_counter_estimated = tf.Variable(0.0, trainable=False,
+                                        name="reward_counter_estimated")
+    reward_sum_estimated = tf.Variable(0.0, trainable=False,
+                                    name="reward_sum_estimated")
+
+    # increment the cumulative reward in the decoder
+    reward_counter_estimated = tf.assign_add(reward_counter_estimated,
+                                          tf.to_float(decoder.batch_size))
+    # sum over batch, mean over samples
+    reward_sum_estimated = tf.assign_add(reward_sum_estimated, tf.reduce_sum(
+        tf.reduce_mean(samples_reward, axis=[0,1])))
+    baseline_estimated = tf.div(reward_sum_estimated, tf.maximum(reward_counter_estimated, 1.0))
+
+    # NAACL version: also use baseline here
+    part2 = tf.reduce_sum((samples_reward-baseline_estimated)*samples_probs, axis=0)
 
     #part1 = tf.Print(part1, [part1], "part1", summarize=10)
     #part2 = tf.Print(part2, [part2], "part2", summarize=10)
