@@ -21,6 +21,8 @@ def expected_loss_objective(decoder: Decoder,
                             reward_function: RewardFunction,
                             number_of_samples: int = 5,
                             ce_smoothing: float = 0.,
+                            renormalize: bool = True,
+                            temperature: float = 1,
                             alpha: float = 1.,
                             control_variate: str = None,
                             simulate_from_ref: bool = True,
@@ -115,8 +117,9 @@ def expected_loss_objective(decoder: Decoder,
     def body(index, rewards, logprobs) -> (int, tf.TensorArray, tf.TensorArray):
 
         sample_loop_result = decoder._decoding_loop(train_mode=False,
-                                                   sample=True)
-        sample_logits = sample_loop_result[0]
+                                                   sample=True,
+                                                    temperature=temperature)
+        sample_logits = sample_loop_result[0]/temperature
         sample_decoded = sample_loop_result[3]
 
         # rewards, shape (batch)
@@ -164,8 +167,11 @@ def expected_loss_objective(decoder: Decoder,
                           tf.maximum(reward_counter, 1.0))
         samples_reward -= baseline
 
-    renormalized_probs = tf.nn.softmax(samples_logprobs * alpha, dim=0)  # softmax over sample space
-    scored_probs = -samples_reward * renormalized_probs
+    if renormalize:
+        # MRT as proposed by Shen et al. 2016
+        samples_logprobs = tf.nn.softmax(samples_logprobs * alpha, dim=0)  # softmax over sample space
+
+    scored_probs = -samples_reward * samples_logprobs
     total_loss = tf.reduce_sum(scored_probs, axis=0)
 
     # average over batch
