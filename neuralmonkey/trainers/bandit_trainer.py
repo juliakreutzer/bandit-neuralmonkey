@@ -219,7 +219,6 @@ def dc_objective(decoder: Decoder, number_of_samples: int=5,
     # logged translation
     hypothesis = decoder.train_inputs  # time, batch
 
-    # TODO might normalize by length
     hyp_logprobs = -tf.contrib.seq2seq.sequence_loss(
         tf.transpose(decoder.train_logits, perm=[1, 0, 2]),
         # batch length voc -> before: length, batch, voc
@@ -238,7 +237,6 @@ def dc_objective(decoder: Decoder, number_of_samples: int=5,
 
     if control_variate == "reweighting":
         hyp_probs /= tf.reduce_sum(hyp_probs)
-        # TODO baseline? & ebay version
 
     def _get_reward_from_service(sources: np.array, hypotheses: np.array) -> np.array:
         """Request the reward for a (time, batch) array from service.
@@ -391,7 +389,6 @@ def dpm_objective(decoder:Decoder, control_variate: str=None) -> Objective:
     # logged translation
     hypothesis = decoder.train_inputs  # time, batch
 
-    # TODO might normalize by length
     hyp_logprobs = -tf.contrib.seq2seq.sequence_loss(
         tf.transpose(decoder.train_logits, perm=[1,0,2]),  # batch length voc -> before: length, batch, voc
         tf.transpose(hypothesis), tf.transpose(decoder.train_padding),
@@ -407,8 +404,7 @@ def dpm_objective(decoder:Decoder, control_variate: str=None) -> Objective:
 
     if control_variate == "reweighting":
         hyp_probs /= tf.reduce_sum(hyp_probs)
-        # TODO baseline?
-
+    
     loss = tf.reduce_sum(-rewards*hyp_probs)
 
     loss = tf.Print(loss, [loss], "loss", summarize=10)
