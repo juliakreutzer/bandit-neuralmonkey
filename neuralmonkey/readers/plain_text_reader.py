@@ -39,7 +39,6 @@ def tokenized_text_reader(encoding: str = "utf-8") -> PlainTextFileReader:
 
     return reader
 
-
 def column_separated_reader(
         column: int, delimiter: str = "\t", quotechar: str = None,
         encoding: str = "utf-8") -> PlainTextFileReader:
