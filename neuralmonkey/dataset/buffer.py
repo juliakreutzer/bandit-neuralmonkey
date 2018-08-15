@@ -11,6 +11,7 @@ class TrainingBuffer:
 
     def log_new_entry(self, entry):
         self.log.write(str(entry))
+        self.log.flush()
 
     def shuffle(self):
         random.shuffle(self.deque)
