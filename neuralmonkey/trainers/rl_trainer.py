@@ -20,14 +20,15 @@ def wxent_objective(decoder: Decoder):
     # neg log likelihood * reward * prob_current/logprob_historic
     # factors are constant wrt model parameters, just for importance sampling
     # TODO add baseline or normalization
+    # TODO normalize by actual length not max output len
     instance_weight = tf.multiply(decoder.reward,
-                                  tf.exp(-decoder.train_xents
-                                         -decoder.historic_logprob))
+                                  tf.exp(-decoder.train_xents/decoder.max_output_len
+                                         -decoder.historic_logprob/decoder.max_output_len))
     total_loss = tf.multiply(-decoder.train_xents,  # - to revert - in NLL
                              tf.stop_gradient(-instance_weight))  # since descent
 
-    total_loss = tf.Print(total_loss, ["current logprob", -decoder.train_xents,
-                                       "historic logprob", decoder.historic_logprob,
+    total_loss = tf.Print(total_loss, ["current logprob", -decoder.train_xents/decoder.max_output_len,
+                                       "historic logprob", decoder.historic_logprob/decoder.max_output_len,
                                        "importance",
                                        tf.exp(-decoder.train_xents
                                                  -decoder.historic_logprob),
