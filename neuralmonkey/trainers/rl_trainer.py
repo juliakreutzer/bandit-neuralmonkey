@@ -8,16 +8,48 @@ from typeguard import check_argument_types
 
 from neuralmonkey.trainers.generic_trainer import Objective
 from neuralmonkey.decoders.decoder import Decoder
-from neuralmonkey.vocabulary import END_TOKEN, PAD_TOKEN
-
+from neuralmonkey.vocabulary import END_TOKEN, PAD_TOKEN, Vocabulary
+from neuralmonkey.dataset.buffer import TrainingBuffer, WeightedTrainInstance
 
 # pylint: disable=invalid-name
 RewardFunction = Callable[[np.ndarray, np.ndarray], np.ndarray]
 # pylint: enable=invalid-name
 
 
+def wxent_objective(decoder: Decoder):
+    # neg log likelihood * reward * prob_current/logprob_historic
+    # factors are constant wrt model parameters, just for importance sampling
+    # TODO add baseline or normalization
+    instance_weight = tf.multiply(decoder.reward,
+                                  tf.exp(-decoder.train_xents
+                                         -decoder.historic_logprob))
+    total_loss = tf.multiply(-decoder.train_xents,  # - to revert - in NLL
+                             tf.stop_gradient(-instance_weight))  # since descent
+
+    total_loss = tf.Print(total_loss, ["current logprob", -decoder.train_xents,
+                                       "historic logprob", decoder.historic_logprob,
+                                       "importance",
+                                       tf.exp(-decoder.train_xents
+                                                 -decoder.historic_logprob),
+                                       "reward", decoder.reward,
+                                       "final weight:", instance_weight])
+
+    batch_loss = tf.reduce_mean(total_loss)
+
+    return Objective(
+        name="{}_wxent".format(decoder.name),
+        decoder=decoder,
+        loss=batch_loss,
+        gradients=None,
+        weight=None
+    )
+
+
 # pylint: disable=too-many-locals
 def rl_objective(decoder: Decoder,
+                 src_vocabulary: Vocabulary,
+                 trg_vocabulary: Vocabulary,
+                 buffer: TrainingBuffer,
                  reward_function: RewardFunction,
                  subtract_baseline: bool = False,
                  normalize: bool = False,
@@ -60,36 +92,60 @@ def rl_objective(decoder: Decoder,
     check_argument_types()
 
     reference = decoder.train_inputs
+    # add source for logging (hack)
+    source = decoder.encoders[0].input_sequence.inputs  # batch x time
 
-    def _score_with_reward_function(references: np.array,
-                                    hypotheses: np.array) -> np.array:
+    def _score_with_reward_function_and_log(sources: np.array,
+                                    references: np.array,
+                                    hypotheses: np.array,
+                                    logprobs: np.array) -> np.array:
         """Score (time, batch) arrays with sentence-based reward function.
 
         Parts of the sentence after generated <pad> or </s> are ignored.
         BPE-postprocessing is also included.
 
+        :param sources: array of indices of sources, shape (batch, time)
         :param references: array of indices of references, shape (time, batch)
         :param hypotheses: array of indices of hypotheses, shape (time, batch)
+        :param logprobs: array of log probabilities of hypotheses, shape (batch)
         :return: an array of batch length with float rewards
         """
         rewards = []
-        for refs, hyps in zip(references.transpose(), hypotheses.transpose()):
+        for srcs, refs, hyps, logprob in zip(sources, references.transpose(), hypotheses.transpose(), logprobs.transpose()):
+            src_seq = []
             ref_seq = []
             hyp_seq = []
+            # TODO decode sources
             for r_token in refs:
-                token = decoder.vocabulary.index_to_word[r_token]
+                token = trg_vocabulary.index_to_word[r_token]
                 if token == END_TOKEN or token == PAD_TOKEN:
                     break
                 ref_seq.append(token)
             for h_token in hyps:
-                token = decoder.vocabulary.index_to_word[h_token]
+                token = trg_vocabulary.index_to_word[h_token]
                 if token == END_TOKEN or token == PAD_TOKEN:
                     break
                 hyp_seq.append(token)
+            for s_token in srcs:
+                token = src_vocabulary.index_to_word[s_token]
+                if token == END_TOKEN or token == PAD_TOKEN:
+                    break
+                src_seq.append(token)
             # join BPEs, split on " " to prepare list for evaluator
             refs_tokens = " ".join(ref_seq).replace("@@ ", "").split(" ")
             hyps_tokens = " ".join(hyp_seq).replace("@@ ", "").split(" ")
+            src_tokens = " ".join(src_seq).replace("@@ ", "").split(" ")
+
             reward = float(reward_function([hyps_tokens], [refs_tokens]))
+
+            if reward > 0:
+                # TODO log! write to file (only if rewards non-zero)
+                # TODO also log pseudo-references and use them for supervised updates (when reward e.g. > 0.9) *without* weighting (doesn't matter how likely it was in old model)
+                # TODO and add to training set? keep in memory for x iterations? keep in id space? make buffer object that has average reward/values available
+                #print(" ".join(hyps_tokens), " ".join(src_tokens), " ".join(refs_tokens), np.exp(logprob), reward, reward/np.exp(logprob), np.log(reward), logprob)
+                train_instance = WeightedTrainInstance(src=src_tokens, trg=hyps_tokens, reward=reward, logprob=logprob)
+                buffer.add_single(train_instance)
+
             rewards.append(reward)
         return np.array(rewards, dtype=np.float32)
 
@@ -105,12 +161,6 @@ def rl_objective(decoder: Decoder,
         sample_logits = sample_loop_result[0]
         sample_decoded = sample_loop_result[3]
 
-        # rewards, shape (batch)
-        # simulate from reference
-        sample_reward = tf.py_func(_score_with_reward_function,
-                                   [reference, sample_decoded],
-                                   tf.float32)
-
         # pylint: disable=invalid-unary-operand-type
         word_logprobs = -tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=sample_decoded, logits=sample_logits)
@@ -118,6 +168,16 @@ def rl_objective(decoder: Decoder,
         # sum word log prob to sentence log prob
         # no masking here, since otherwise shorter sentences are preferred
         sent_logprobs = tf.reduce_sum(word_logprobs, axis=0)
+
+        # rewards, shape (batch)
+        # simulate from reference
+        sample_reward = tf.py_func(_score_with_reward_function_and_log,
+                                   [source, reference, sample_decoded, sent_logprobs],
+                                   tf.float32)
+
+
+        # inspect samples, rewards and probs for debugging
+        #sent_logprobs = tf.Print(sent_logprobs, [tf.exp(sent_logprobs), sample_reward, sample_reward/tf.exp(sent_logprobs)])
 
         samples_rewards.append(sample_reward)   # sample_size x batch
         samples_logprobs.append(sent_logprobs)  # sample_size x batch

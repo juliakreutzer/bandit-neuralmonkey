@@ -250,7 +250,7 @@ class Decoder(AutoregressiveDecoder):
     def get_body(self,
                  train_mode: bool,
                  sample: bool = False,
-                 temperature: float = 1) -> Callable:
+                 temperature: float = 1.) -> Callable:
         # pylint: disable=too-many-branches
         def body(*args) -> LoopState:
             loop_state = LoopState(*args)

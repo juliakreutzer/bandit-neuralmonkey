@@ -17,6 +17,7 @@ from typeguard import check_argument_types, check_type
 
 from neuralmonkey.logging import log, log_print, warn, notice
 from neuralmonkey.dataset import Dataset, LazyDataset
+from neuralmonkey.dataset.buffer import TrainingBuffer
 from neuralmonkey.tf_manager import TensorFlowManager
 from neuralmonkey.runners.base_runner import BaseRunner, ExecutionResult
 from neuralmonkey.trainers.generic_trainer import GenericTrainer
@@ -40,6 +41,9 @@ def training_loop(tf_manager: TensorFlowManager,
                   evaluators: EvalConfiguration,
                   runners: List[BaseRunner],
                   train_dataset: Dataset,
+                  train_buffer: TrainingBuffer,
+                  buffer_trainer: GenericTrainer,
+                  buffer_freq: int,
                   val_dataset: Union[Dataset, List[Dataset]],
                   test_datasets: Optional[List[Dataset]] = None,
                   logging_period: Union[str, int] = 20,
@@ -92,7 +96,7 @@ def training_loop(tf_manager: TensorFlowManager,
         postprocess: A function which takes the dataset with its output series
             and generates additional series from them.
     """
-    check_argument_types()
+    #check_argument_types()
 
     if isinstance(val_dataset, Dataset):
         val_datasets = [val_dataset]
@@ -169,9 +173,11 @@ def training_loop(tf_manager: TensorFlowManager,
                 seen_instances += len(batch_dataset)
                 if _is_logging_time(step, log_period_batch,
                                     last_log_time, log_period_time):
+                    #log('Train normally with logging.')
+                    # FIXME doesn't work with summary
                     trainer_result = tf_manager.execute(
                         batch_dataset, [trainer], train=True,
-                        summaries=True)
+                        summaries=False)
                     train_results, train_outputs = run_on_dataset(
                         tf_manager, runners, batch_dataset,
                         postprocess, write_out=False,
@@ -188,9 +194,29 @@ def training_loop(tf_manager: TensorFlowManager,
                         seen_instances, epoch_n, epochs, trainer_result,
                         train=True)
                     last_log_time = time.process_time()
+
+                    # TODO also include weighted xent update from new logs
+                    if _is_buffer_time(step, buffer_freq) and len(train_buffer)> 2*batch_size:
+                        log('Train with batch from buffer.')
+                        # TODO make Dataset from buffer
+                        train_dataset_buffer = Dataset(name="train_buffer", series={"source": [b.src for b in train_buffer.deque], "target": [b.trg for b in train_buffer.deque], "reward": [b.reward for b in train_buffer.deque], "logprob": [b.logprob for b in train_buffer.deque]}, series_outputs={}, preprocessors=None)
+                        log("Current size of buffer: {}".format(len(train_buffer)))
+                        batched_buffer = [i for i in train_dataset_buffer.batch_dataset(batch_size=batch_size)][0]
+                        trainer_result = tf_manager.execute(batched_buffer, [buffer_trainer], train=True,
+                            summaries=False)
+
                 else:
                     tf_manager.execute(batch_dataset, [trainer],
                                        train=True, summaries=False)
+                    if _is_buffer_time(step, buffer_freq) and len(train_buffer)> 2*batch_size:
+                        log('Train with batch from buffer.')
+                        # TODO make Dataset from buffer
+                        # TODO make nicer: create batch dataset directly
+                        log("Current size of buffer: {}".format(len(train_buffer)))
+                        train_dataset_buffer = Dataset(name="train_buffer", series={"source": [b.src for b in train_buffer.deque], "target": [b.trg for b in train_buffer.deque], "reward": [b.reward for b in train_buffer.deque], "logprob": [b.logprob for b in train_buffer.deque]}, series_outputs={}, preprocessors=None)
+                        batched_buffer = [i for i in train_dataset_buffer.batch_dataset(batch_size=batch_size)][0]
+                        trainer_result = tf_manager.execute(batched_buffer, [buffer_trainer], train=True,
+                            summaries=False)
 
                 if _is_logging_time(step, val_period_batch,
                                     last_val_time, val_period_time):
@@ -308,6 +334,12 @@ def _is_logging_time(step: int, logging_period_batch: int,
         return step % logging_period_batch == logging_period_batch - 1
     return last_log_time + logging_period_time < time.process_time()
 
+
+def _is_buffer_time(step: int, buffer_freq: int):
+    if buffer_freq > 0:
+        return step % buffer_freq == 0
+    else:
+        return False
 
 def _resolve_period(period):
     if isinstance(period, int):

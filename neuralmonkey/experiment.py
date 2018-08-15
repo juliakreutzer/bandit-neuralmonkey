@@ -175,6 +175,9 @@ class Experiment(object):
                 evaluators=self.model.evaluation,
                 runners=self.model.runners,
                 train_dataset=self.model.train_dataset,
+                train_buffer=self.model.train_buffer,
+                buffer_trainer=self.model.buffer_trainer,
+                buffer_freq=self.model.buffer_freq,
                 val_dataset=self.model.val_dataset,
                 test_datasets=self.model.test_datasets,
                 logging_period=self.model.logging_period,
@@ -330,6 +333,9 @@ def create_config(train_mode: bool = True) -> Configuration:
         config.add_argument("train_dataset")
         config.add_argument("val_dataset")
         config.add_argument("evaluation")
+        config.add_argument("train_buffer", required=False, default=None)
+        config.add_argument("buffer_freq", required=False, default=1)
+        config.add_argument("buffer_trainer", required=False, default=None)
         config.add_argument("test_datasets", required=False, default=[])
         config.add_argument("logging_period", required=False, default=20)
         config.add_argument("validation_period", required=False, default=500)

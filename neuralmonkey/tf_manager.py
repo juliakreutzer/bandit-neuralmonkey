@@ -21,6 +21,7 @@ from typeguard import check_argument_types
 
 from neuralmonkey.logging import log
 from neuralmonkey.dataset import Dataset
+from neuralmonkey.dataset.buffer import TrainingBuffer
 # pylint: disable=unused-import
 from neuralmonkey.runners.base_runner import FeedDict
 # pylint: enable=unused-import

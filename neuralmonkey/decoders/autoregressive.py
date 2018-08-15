@@ -12,6 +12,7 @@ import numpy as np
 import tensorflow as tf
 
 from neuralmonkey.dataset import Dataset
+from neuralmonkey.dataset.buffer import TrainingBuffer
 from neuralmonkey.decorators import tensor
 from neuralmonkey.model.model_part import ModelPart, FeedDict, InitializerSpecs
 from neuralmonkey.logging import log, warn
@@ -140,6 +141,10 @@ class AutoregressiveDecoder(ModelPart):
                 tf.int32, [None, None], "train_inputs")
             self.train_mask = tf.placeholder(
                 tf.float32, [None, None], "train_mask")
+            # for counterfactual learning with logged translations
+            self.reward = tf.placeholder(tf.float32, [None], "reward")
+            self.historic_logprob = tf.placeholder(tf.float32, [None],
+                                                   "historic_logprob")
     # pylint: enable=too-many-arguments
 
     @tensor
@@ -409,6 +414,13 @@ class AutoregressiveDecoder(ModelPart):
         fd = ModelPart.feed_dict(self, dataset, train)
 
         sentences = dataset.maybe_get_series(self.data_id)
+        if dataset.has_series("reward") and dataset.has_series("logprob"):
+            #print("Detected counterfactual learning, "
+            #      "loading rewards and historic logprobs as well.")
+            reward = dataset.maybe_get_series("reward")
+            logprob = dataset.maybe_get_series("logprob")
+            fd[self.reward] = reward
+            fd[self.historic_logprob] = logprob
 
         if sentences is None and train:
             raise ValueError("When training, you must feed "

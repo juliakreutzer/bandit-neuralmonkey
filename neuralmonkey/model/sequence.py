@@ -290,5 +290,5 @@ class EmbeddedSequence(EmbeddedFactorSequence):
 
     @property
     def data_id(self) -> str:
-        """Return the input data series indentifier."""
+        """Return the input data series identifier."""
         return self.data_ids[0]
