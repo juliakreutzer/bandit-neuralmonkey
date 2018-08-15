@@ -196,11 +196,12 @@ def training_loop(tf_manager: TensorFlowManager,
                     last_log_time = time.process_time()
 
                     # TODO also include weighted xent update from new logs
-                    if _is_buffer_time(step, buffer_freq) and len(train_buffer)> 2*batch_size:
+                    if _is_buffer_time(step, buffer_freq) and len(train_buffer)>= min(2*batch_size, train_buffer.max_size):
                         log('Train with batch from buffer.')
+                        log("Current size of buffer: {}".format(
+                            len(train_buffer)))
                         # TODO make Dataset from buffer
                         train_dataset_buffer = Dataset(name="train_buffer", series={"source": [b.src for b in train_buffer.deque], "target": [b.trg for b in train_buffer.deque], "reward": [b.reward for b in train_buffer.deque], "logprob": [b.logprob for b in train_buffer.deque]}, series_outputs={}, preprocessors=None)
-                        log("Current size of buffer: {}".format(len(train_buffer)))
                         batched_buffer = [i for i in train_dataset_buffer.batch_dataset(batch_size=batch_size)][0]
                         trainer_result = tf_manager.execute(batched_buffer, [buffer_trainer], train=True,
                             summaries=False)
@@ -208,12 +209,20 @@ def training_loop(tf_manager: TensorFlowManager,
                 else:
                     tf_manager.execute(batch_dataset, [trainer],
                                        train=True, summaries=False)
-                    if _is_buffer_time(step, buffer_freq) and len(train_buffer)> 2*batch_size:
+                    if _is_buffer_time(step, buffer_freq) and len(train_buffer)>= min(2*batch_size, train_buffer.max_size):
                         log('Train with batch from buffer.')
                         # TODO make Dataset from buffer
                         # TODO make nicer: create batch dataset directly
                         log("Current size of buffer: {}".format(len(train_buffer)))
-                        train_dataset_buffer = Dataset(name="train_buffer", series={"source": [b.src for b in train_buffer.deque], "target": [b.trg for b in train_buffer.deque], "reward": [b.reward for b in train_buffer.deque], "logprob": [b.logprob for b in train_buffer.deque]}, series_outputs={}, preprocessors=None)
+                        if train_dataset.has_series('source_bpe'):
+                            src_series = 'source_bpe'
+                        else:
+                            src_series = 'source'
+                        if train_dataset.has_series('target_bpe'):
+                            trg_series = 'target_bpe'
+                        else:
+                            trg_series = 'target'
+                        train_dataset_buffer = Dataset(name="train_buffer", series={src_series: [b.src for b in train_buffer.deque], trg_series: [b.trg for b in train_buffer.deque], "reward": [b.reward for b in train_buffer.deque], "logprob": [b.logprob for b in train_buffer.deque]}, series_outputs={}, preprocessors=None)
                         batched_buffer = [i for i in train_dataset_buffer.batch_dataset(batch_size=batch_size)][0]
                         trainer_result = tf_manager.execute(batched_buffer, [buffer_trainer], train=True,
                             summaries=False)

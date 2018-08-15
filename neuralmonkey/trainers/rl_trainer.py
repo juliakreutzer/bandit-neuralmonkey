@@ -139,11 +139,12 @@ def rl_objective(decoder: Decoder,
             reward = float(reward_function([hyps_tokens], [refs_tokens]))
 
             if reward > 0:
-                # TODO log! write to file (only if rewards non-zero)
                 # TODO also log pseudo-references and use them for supervised updates (when reward e.g. > 0.9) *without* weighting (doesn't matter how likely it was in old model)
                 # TODO and add to training set? keep in memory for x iterations? keep in id space? make buffer object that has average reward/values available
                 #print(" ".join(hyps_tokens), " ".join(src_tokens), " ".join(refs_tokens), np.exp(logprob), reward, reward/np.exp(logprob), np.log(reward), logprob)
-                train_instance = WeightedTrainInstance(src=src_tokens, trg=hyps_tokens, reward=reward, logprob=logprob)
+                # no BPE postprocessing or the like
+                train_instance = WeightedTrainInstance(src=src_seq, trg=hyp_seq,
+                                                       reward=reward, logprob=logprob)
                 buffer.add_single(train_instance)
 
             rewards.append(reward)
