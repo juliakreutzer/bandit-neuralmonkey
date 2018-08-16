@@ -19,9 +19,13 @@ RewardFunction = Callable[[np.ndarray, np.ndarray], np.ndarray]
 def wxent_objective(decoder: Decoder):
     # neg log likelihood * reward * prob_current/logprob_historic
     # factors are constant wrt model parameters, just for importance sampling
-    # TODO add baseline or normalization
+    # TODO add normalization
     # TODO normalize by actual length not max output len
-    instance_weight = tf.multiply(decoder.reward,
+
+    baseline = tf.div(decoder.reward_sum,
+                      tf.maximum(decoder.reward_counter, 1.0))
+    baseline = tf.Print(baseline, ['baseline wxent', baseline])
+    instance_weight = tf.multiply(decoder.reward-baseline,
                                   tf.exp(-decoder.train_xents/decoder.max_output_len
                                          -decoder.historic_logprob/decoder.max_output_len))
     total_loss = tf.multiply(-decoder.train_xents,  # - to revert - in NLL
@@ -30,9 +34,11 @@ def wxent_objective(decoder: Decoder):
     total_loss = tf.Print(total_loss, ["current logprob", -decoder.train_xents/decoder.max_output_len,
                                        "historic logprob", decoder.historic_logprob/decoder.max_output_len,
                                        "importance",
-                                       tf.exp(-decoder.train_xents
-                                                 -decoder.historic_logprob),
+                                       tf.exp(-decoder.train_xents/decoder.max_output_len
+                                                 -decoder.historic_logprob/decoder.max_output_len),
                                        "reward", decoder.reward,
+                                       "baseline", baseline,
+                                       "advantage", decoder.reward-baseline,
                                        "final weight:", instance_weight])
 
     batch_loss = tf.reduce_mean(total_loss)
@@ -190,19 +196,22 @@ def rl_objective(decoder: Decoder,
 
     if subtract_baseline:
         # if specified, compute the average reward baseline
-        reward_counter = tf.Variable(0.0, trainable=False,
-                                     name="reward_counter")
-        reward_sum = tf.Variable(0.0, trainable=False, name="reward_sum")
+        # moved to decoder
+        #reward_counter = tf.Variable(0.0, trainable=False,
+        #                             name="reward_counter")
+        #reward_sum = tf.Variable(0.0, trainable=False, name="reward_sum")
         # increment the cumulative reward
-        reward_counter = tf.assign_add(
-            reward_counter, tf.to_float(decoder.batch_size * sample_size))
+        decoder.reward_counter = tf.assign_add(
+            decoder.reward_counter,
+            tf.to_float(decoder.batch_size * sample_size))
         # sum over batch and samples
-        reward_sum = tf.assign_add(reward_sum,
-                                   tf.reduce_sum(samples_rewards_stacked))
+        decoder.reward_sum = tf.assign_add(decoder.reward_sum,
+                                           tf.reduce_sum(samples_rewards_stacked))
         # compute baseline: avg of previous rewards
-        baseline = tf.div(reward_sum,
-                          tf.maximum(reward_counter, 1.0))
+        baseline = tf.div(decoder.reward_sum,
+                          tf.maximum(decoder.reward_counter, 1.0))
         samples_rewards_stacked -= baseline
+
 
         tf.summary.scalar(
             "train_{}/rl_reward_baseline".format(decoder.data_id),

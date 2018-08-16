@@ -111,6 +111,12 @@ class AutoregressiveDecoder(ModelPart):
         self.tie_embeddings = tie_embeddings
         self.supress_unk = supress_unk
 
+        #self.baseline = tf.Variable(0.0, trainable=False,
+        #                             name="decoder_bl")
+        self.reward_counter = tf.Variable(0.0, trainable=False,
+                                     name="reward_counter")
+        self.reward_sum = tf.Variable(0.0, trainable=False, name="reward_sum")
+
         # check the values of the parameters (max_output_len, ...)
         if max_output_len <= 0:
             raise ValueError("Maximum sequence length must be "
