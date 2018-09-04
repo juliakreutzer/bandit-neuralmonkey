@@ -63,7 +63,8 @@ def rl_objective(decoder: Decoder,
                  temperature: float = 1.,
                  ce_smoothing: float = 0.,
                  alpha: float = 1.,
-                 sample_size: int = 1) -> Objective:
+                 sample_size: int = 1,
+                 greedy: bool = False) -> Objective:
     """Construct RL objective for training with sentence-level feedback.
 
     Depending on the options the objective corresponds to:
@@ -164,7 +165,7 @@ def rl_objective(decoder: Decoder,
         # sample from logits
         # decoded, shape (time, batch)
         sample_loop_result = decoder.decoding_loop(train_mode=False,
-                                                   sample=True,
+                                                   sample=not greedy,
                                                    temperature=temperature)
         sample_logits = sample_loop_result[0]
         sample_decoded = sample_loop_result[3]
