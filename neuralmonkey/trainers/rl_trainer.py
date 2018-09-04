@@ -64,7 +64,8 @@ def rl_objective(decoder: Decoder,
                  ce_smoothing: float = 0.,
                  alpha: float = 1.,
                  sample_size: int = 1,
-                 greedy: bool = False) -> Objective:
+                 greedy: bool = False,
+                 entropy_regularization: float = 0.) -> Objective:
     """Construct RL objective for training with sentence-level feedback.
 
     Depending on the options the objective corresponds to:
@@ -160,6 +161,7 @@ def rl_objective(decoder: Decoder,
 
     samples_rewards = []
     samples_logprobs = []
+    samples_entropies = []
 
     for _ in range(sample_size):
         # sample from logits
@@ -167,8 +169,8 @@ def rl_objective(decoder: Decoder,
         sample_loop_result = decoder.decoding_loop(train_mode=False,
                                                    sample=not greedy,
                                                    temperature=temperature)
-        sample_logits = sample_loop_result[0]
-        sample_decoded = sample_loop_result[3]
+        sample_logits = sample_loop_result[0]  # time x batch x vocab
+        sample_decoded = sample_loop_result[3]  # time x batch
 
         # pylint: disable=invalid-unary-operand-type
         word_logprobs = -tf.nn.sparse_softmax_cross_entropy_with_logits(
@@ -177,6 +179,12 @@ def rl_objective(decoder: Decoder,
         # sum word log prob to sentence log prob
         # no masking here, since otherwise shorter sentences are preferred
         sent_logprobs = tf.reduce_sum(word_logprobs, axis=0)
+
+        # entropy
+        entropy = -tf.reduce_sum(
+            tf.nn.log_softmax(sample_logits) * tf.nn.softmax(sample_logits),
+            axis=-1)  # time x batch
+        sent_entropy = tf.reduce_sum(entropy, axis=0)   # batch
 
         # rewards, shape (batch)
         # simulate from reference
@@ -190,10 +198,12 @@ def rl_objective(decoder: Decoder,
 
         samples_rewards.append(sample_reward)   # sample_size x batch
         samples_logprobs.append(sent_logprobs)  # sample_size x batch
+        samples_entropies.append(sent_entropy)
 
     # stack samples, sample_size x batch
     samples_rewards_stacked = tf.stack(samples_rewards)
     samples_logprobs_stacked = tf.stack(samples_logprobs)
+    samples_entropies_stacked = tf.stack(samples_entropies)
 
     if subtract_baseline:
         # if specified, compute the average reward baseline
@@ -228,6 +238,17 @@ def rl_objective(decoder: Decoder,
 
     # sum over samples
     total_loss = tf.reduce_sum(scored_probs, axis=0)
+
+    # entropy regularization: sum over samples and time of entropies of softmax
+    if entropy_regularization > 0:
+        total_loss = tf.Print(total_loss, ['mean batch entropies',
+                                           tf.reduce_mean(
+                                               tf.reduce_sum(
+                                                   samples_entropies_stacked,
+                                                   axis=[0]))])
+        # sum over samples, we want to encourage high entropy
+        total_loss -= entropy_regularization * tf.reduce_sum(
+            samples_entropies_stacked, axis=0)
 
     # average over batch
     batch_loss = tf.reduce_mean(total_loss)
