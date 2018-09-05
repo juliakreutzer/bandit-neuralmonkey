@@ -56,8 +56,8 @@ def wxent_objective(decoder: Decoder):
 def rl_objective(decoder: Decoder,
                  src_vocabulary: Vocabulary,
                  trg_vocabulary: Vocabulary,
-                 buffer: TrainingBuffer,
                  reward_function: RewardFunction,
+                 buffer: TrainingBuffer = None,
                  subtract_baseline: bool = False,
                  normalize: bool = False,
                  temperature: float = 1.,
@@ -147,13 +147,14 @@ def rl_objective(decoder: Decoder,
 
             reward = float(reward_function([hyps_tokens], [refs_tokens]))
 
-            if reward > 0:
+            if reward > 0 and buffer is not None:
                 # TODO also log pseudo-references and use them for supervised updates (when reward e.g. > 0.9) *without* weighting (doesn't matter how likely it was in old model)
                 # TODO and add to training set? keep in memory for x iterations? keep in id space? make buffer object that has average reward/values available
                 #print(" ".join(hyps_tokens), " ".join(src_tokens), " ".join(refs_tokens), np.exp(logprob), reward, reward/np.exp(logprob), np.log(reward), logprob)
                 # no BPE postprocessing or the like
                 train_instance = WeightedTrainInstance(src=src_seq, trg=hyp_seq,
                                                        reward=reward, logprob=logprob)
+
                 buffer.add_single(train_instance)
 
             rewards.append(reward)
